@@ -89,6 +89,18 @@ pub struct JobSearchInput {
     pub mode: Option<String>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CodeResearchInput {
+    #[schemars(description = "Framework or library to research, e.g. \"axum\", \"tokio\", \"claude code\"")]
+    pub framework: String,
+    #[schemars(description = "Version to target, e.g. \"0.8\". Defaults to \"latest\" if omitted.")]
+    pub version: Option<String>,
+    #[schemars(description = "Aspects to research: bugs, changelog, community, releases. Defaults to [\"bugs\", \"changelog\", \"community\"] if omitted.")]
+    pub aspects: Option<Vec<String>>,
+    #[schemars(description = "GitHub repo slug, e.g. \"tokio-rs/tokio\". Anchors bug/release queries to GitHub.")]
+    pub repo: Option<String>,
+}
+
 // ── Server struct ─────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
