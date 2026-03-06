@@ -1,0 +1,50 @@
+# Domain profiles for the researcher agent.
+# Each profile restricts web searches to the listed domains.
+# Pass domain_profile="<key>" to any research call (MCP, HTTP, or CLI --domain-profile).
+# Profiles can be combined with raw `domains` — they are unioned.
+
+[shopping-ro]
+domains = ["olx.ro", "publi24.ro", "okazii.ro", "emag.ro", "altex.ro"]
+
+[tech-news]
+domains = [
+  "news.ycombinator.com",
+  "lobste.rs",
+  "reddit.com/r/programming",
+  "reddit.com/r/rust",
+  "reddit.com/r/technology",
+]
+
+[llm-news]
+domains = [
+  "huggingface.co",
+  "arxiv.org",
+  "reddit.com/r/LocalLLaMA",
+  "reddit.com/r/MachineLearning",
+  "reddit.com/r/artificial",
+]
+
+[academic]
+domains = [
+  "arxiv.org",
+  "semanticscholar.org",
+  "pubmed.ncbi.nlm.nih.gov",
+]
+
+[news]
+domains = [
+  "reddit.com/r/worldnews",
+  "reddit.com/r/news",
+  "reddit.com/r/europe",
+  "bbc.com",
+  "reuters.com",
+]
+
+[travel]
+domains = [
+  "reddit.com/r/travel",
+  "reddit.com/r/solotravel",
+  "tripadvisor.com",
+  "lonelyplanet.com",
+  "wikivoyage.org",
+]

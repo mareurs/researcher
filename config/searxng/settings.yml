@@ -1,0 +1,44 @@
+# Minimal SearXNG config for Researcher
+# Enables JSON output format and disables the web UI rate limiter.
+
+use_default_settings: true
+
+general:
+  instance_name: "Researcher SearXNG"
+  debug: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  formats:
+    - html
+    - json   # Required — researcher uses the JSON API
+
+server:
+  secret_key: "researcher-local-secret-change-in-prod"
+  limiter: false   # Disable rate limiting for local use
+  image_proxy: false
+
+engines:
+  # Keep only reliable engines; comment out any that need API keys
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: false
+  - name: brave
+    engine: brave
+    shortcut: brave
+    disabled: false
+
+ui:
+  default_theme: simple
+  query_in_title: false

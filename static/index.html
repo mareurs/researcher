@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Researcher</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    code, pre { font-family: 'JetBrains Mono', monospace; }
+
+    /* Markdown report styles */
+    #report h1 { font-size: 1.75rem; font-weight: 700; margin: 1.5rem 0 0.75rem; border-bottom: 2px solid #e5e7eb; padding-bottom: 0.5rem; }
+    #report h2 { font-size: 1.35rem; font-weight: 600; margin: 1.25rem 0 0.5rem; }
+    #report h3 { font-size: 1.1rem; font-weight: 600; margin: 1rem 0 0.4rem; }
+    #report p  { margin: 0.6rem 0; line-height: 1.7; }
+    #report ul, #report ol { margin: 0.5rem 0 0.5rem 1.5rem; }
+    #report li { margin: 0.25rem 0; line-height: 1.6; }
+    #report a  { color: #2563eb; text-decoration: underline; }
+    #report code { background: #f1f5f9; padding: 0.1em 0.35em; border-radius: 0.25rem; font-size: 0.875em; }
+    #report pre  { background: #1e293b; color: #e2e8f0; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.75rem 0; }
+    #report pre code { background: none; padding: 0; color: inherit; }
+    #report blockquote { border-left: 3px solid #6366f1; padding-left: 1rem; color: #64748b; margin: 0.75rem 0; }
+    #report table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+    #report th, #report td { border: 1px solid #e5e7eb; padding: 0.5rem 0.75rem; text-align: left; }
+    #report th { background: #f8fafc; font-weight: 600; }
+    #report tr:nth-child(even) { background: #f8fafc; }
+
+    .log-entry { animation: fadeIn 0.2s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+    .spinner { animation: spin 1s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-10">
+    <div class="max-w-4xl mx-auto px-6 py-4 flex items-center gap-3">
+      <svg class="w-7 h-7 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+      </svg>
+      <h1 class="text-xl font-semibold text-slate-900">Researcher</h1>
+      <span class="ml-auto text-xs text-slate-400 font-mono">Rust · Qwen3.5-9B · llama.cpp</span>
+    </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto px-6 py-8 space-y-6">
+
+    <!-- Search form -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <form id="form" class="flex gap-3">
+        <input
+          id="query"
+          type="text"
+          placeholder="What do you want to research?"
+          class="flex-1 rounded-xl border border-slate-300 px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          required
+        />
+        <button
+          type="submit"
+          id="submit-btn"
+          class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-6 py-3 rounded-xl transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <span id="btn-text">Research</span>
+          <svg id="btn-spinner" class="spinner w-4 h-4 hidden" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+          </svg>
+        </button>
+      </form>
+    </div>
+
+    <!-- Progress log -->
+    <div id="progress-panel" class="hidden bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <h2 class="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">Progress</h2>
+      <div id="progress-log" class="space-y-1.5 font-mono text-sm"></div>
+    </div>
+
+    <!-- Sub-questions -->
+    <div id="queries-panel" class="hidden bg-indigo-50 rounded-2xl border border-indigo-100 p-6">
+      <h2 class="text-sm font-semibold text-indigo-600 uppercase tracking-wider mb-3">Research Queries</h2>
+      <ol id="queries-list" class="space-y-1 text-slate-700 text-sm list-decimal list-inside"></ol>
+    </div>
+
+    <!-- Report -->
+    <div id="report-panel" class="hidden bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-sm font-semibold text-slate-500 uppercase tracking-wider">Research Report</h2>
+        <button id="copy-btn" onclick="copyReport()"
+          class="text-xs text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+          </svg>
+          Copy Markdown
+        </button>
+      </div>
+      <div id="report" class="text-slate-800 text-[0.925rem]"></div>
+    </div>
+
+    <!-- Error -->
+    <div id="error-panel" class="hidden bg-red-50 border border-red-200 rounded-2xl p-6">
+      <p class="text-red-700 text-sm font-medium" id="error-msg"></p>
+    </div>
+
+  </main>
+
+  <script>
+    let rawMarkdown = '';
+
+    const form       = document.getElementById('form');
+    const queryInput = document.getElementById('query');
+    const submitBtn  = document.getElementById('submit-btn');
+    const btnText    = document.getElementById('btn-text');
+    const btnSpinner = document.getElementById('btn-spinner');
+    const progressPanel = document.getElementById('progress-panel');
+    const progressLog   = document.getElementById('progress-log');
+    const queriesPanel  = document.getElementById('queries-panel');
+    const queriesList   = document.getElementById('queries-list');
+    const reportPanel   = document.getElementById('report-panel');
+    const reportEl      = document.getElementById('report');
+    const errorPanel    = document.getElementById('error-panel');
+    const errorMsg      = document.getElementById('error-msg');
+
+    marked.setOptions({ breaks: true, gfm: true });
+
+    function setLoading(on) {
+      submitBtn.disabled = on;
+      btnText.textContent = on ? 'Researching...' : 'Research';
+      btnSpinner.classList.toggle('hidden', !on);
+    }
+
+    function addLog(text, type = 'info') {
+      const colors = { info: 'text-slate-600', ok: 'text-emerald-600', warn: 'text-amber-600' };
+      const el = document.createElement('div');
+      el.className = `log-entry ${colors[type] || colors.info}`;
+      el.textContent = text;
+      progressLog.appendChild(el);
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function reset() {
+      progressLog.innerHTML = '';
+      queriesList.innerHTML = '';
+      reportEl.innerHTML    = '';
+      rawMarkdown           = '';
+      [progressPanel, queriesPanel, reportPanel, errorPanel].forEach(el => el.classList.add('hidden'));
+    }
+
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorPanel.classList.remove('hidden');
+    }
+
+    function copyReport() {
+      navigator.clipboard.writeText(rawMarkdown).then(() => {
+        const btn = document.getElementById('copy-btn');
+        btn.textContent = '✓ Copied';
+        setTimeout(() => btn.innerHTML = `
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+          </svg>
+          Copy Markdown`, 2000);
+      });
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const query = queryInput.value.trim();
+      if (!query) return;
+
+      reset();
+      setLoading(true);
+      progressPanel.classList.remove('hidden');
+      addLog(`🔬 Researching: "${query}"`);
+
+      try {
+        const resp = await fetch('/research/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query }),
+        });
+
+        if (!resp.ok) throw new Error(`Server error: ${resp.status}`);
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop(); // keep incomplete line
+
+          for (const line of lines) {
+            if (!line.startsWith('data:')) continue;
+            const json = line.slice(5).trim();
+            if (!json || json === '[DONE]') continue;
+
+            try {
+              const msg = JSON.parse(json);
+
+              if (msg.type === 'progress') {
+                addLog(msg.message, msg.message.startsWith('✅') ? 'ok' : 'info');
+                if (msg.data?.queries) {
+                  queriesPanel.classList.remove('hidden');
+                  msg.data.queries.forEach((q) => {
+                    const li = document.createElement('li');
+                    li.textContent = q;
+                    queriesList.appendChild(li);
+                  });
+                }
+                // Show report panel early when writing begins
+                if (msg.message.includes('Writing')) {
+                  rawMarkdown = '';
+                  reportEl.innerHTML = '';
+                  reportPanel.classList.remove('hidden');
+                  reportPanel.scrollIntoView({ behavior: 'smooth' });
+                }
+              } else if (msg.type === 'token') {
+                // Stream tokens into report panel in real-time
+                rawMarkdown += msg.content;
+                reportEl.innerHTML = marked.parse(rawMarkdown);
+              } else if (msg.type === 'complete') {
+                // Final report — re-render once to ensure consistency
+                rawMarkdown = msg.report;
+                reportEl.innerHTML = marked.parse(msg.report);
+                reportPanel.classList.remove('hidden');
+                addLog(`✅ Done — ${msg.source_count} sources`, 'ok');
+              } else if (msg.type === 'error') {
+                showError(msg.message);
+              }
+            } catch (_) {}
+          }
+        }
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    });
+  </script>
+</body>
+</html>
