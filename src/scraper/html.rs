@@ -9,15 +9,20 @@ pub async fn fetch_and_extract(
     http: &Client,
     url: &str,
     max_chars: usize,
+    cookie: Option<&str>,
 ) -> Result<String> {
     debug!(%url, "fetching page");
 
-    let resp = http
+    let mut req = http
         .get(url)
         .header("User-Agent", "Mozilla/5.0 (compatible; Researcher/0.1)")
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await?;
+        .timeout(std::time::Duration::from_secs(15));
+
+    if let Some(c) = cookie {
+        req = req.header("Cookie", c);
+    }
+
+    let resp = req.send().await?;
 
     if !resp.status().is_success() {
         anyhow::bail!("HTTP {} for {}", resp.status(), url);

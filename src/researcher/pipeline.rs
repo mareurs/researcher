@@ -21,6 +21,35 @@ pub enum ResearchMode {
     Deep,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum PersonMethod {
+    Company,
+    Personal,
+    Both,
+}
+
+impl std::str::FromStr for PersonMethod {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, ()> {
+        match s {
+            "company"  => Ok(PersonMethod::Company),
+            "personal" => Ok(PersonMethod::Personal),
+            _          => Ok(PersonMethod::Both),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ResearchTarget {
+    Topic,
+    Person { method: PersonMethod },
+    Company,
+}
+
+impl Default for ResearchTarget {
+    fn default() -> Self { ResearchTarget::Topic }
+}
+
 pub struct ResearchRequest {
     pub topic: String,
     pub mode: ResearchMode,
@@ -28,6 +57,7 @@ pub struct ResearchRequest {
     pub domains: Vec<String>,
     /// Named profile from profiles.toml (e.g. "shopping-ro")
     pub domain_profile: Option<String>,
+    pub target: ResearchTarget,
 }
 
 impl ResearchRequest {
@@ -37,7 +67,38 @@ impl ResearchRequest {
             mode: ResearchMode::default(),
             domains: vec![],
             domain_profile: None,
+            target: ResearchTarget::default(),
         }
+    }
+}
+
+pub fn domains_for_target(target: &ResearchTarget) -> Vec<String> {
+    match target {
+        ResearchTarget::Topic => vec![],
+        ResearchTarget::Person { method } => {
+            let professional: &[&str] = &[
+                "linkedin.com", "twitter.com", "x.com", "github.com",
+                "medium.com", "scholar.google.com",
+            ];
+            let personal: &[&str] = &[
+                "facebook.com", "instagram.com", "twitter.com", "x.com",
+                "reddit.com", "tiktok.com",
+            ];
+            let domains: Vec<&str> = match method {
+                PersonMethod::Company  => professional.to_vec(),
+                PersonMethod::Personal => personal.to_vec(),
+                PersonMethod::Both => {
+                    let mut v = professional.to_vec();
+                    v.extend_from_slice(personal);
+                    v
+                }
+            };
+            domains.into_iter().map(String::from).collect()
+        }
+        ResearchTarget::Company => vec![
+            "linkedin.com", "crunchbase.com", "bloomberg.com",
+            "glassdoor.com", "trustpilot.com", "wikipedia.org",
+        ].into_iter().map(String::from).collect(),
     }
 }
 
@@ -76,6 +137,11 @@ pub async fn run(
         }
     }
 
+    // Fall back to target-specific domain set when no explicit domains given
+    if domains.is_empty() {
+        domains = domains_for_target(&request.target);
+    }
+
     // 2. Deep mode multipliers
     let depth = matches!(request.mode, ResearchMode::Deep);
     let max_queries = if depth { cfg.max_search_queries * 2 } else { cfg.max_search_queries };
@@ -90,7 +156,7 @@ pub async fn run(
 
     // 4. Plan
     on_progress(ProgressEvent::Planning);
-    let queries = generate_queries(&llm, topic, max_queries, &domains).await?;
+    let queries = generate_queries(&llm, topic, max_queries, &domains, &request.target).await?;
     on_progress(ProgressEvent::Queries(queries.clone()));
 
     // 5. Crawl (deep mode uses overridden max_sources_per_query)
@@ -158,7 +224,7 @@ pub async fn run(
 
     // 10. Write report (streaming if token_tx provided)
     on_progress(ProgressEvent::WritingReport);
-    let raw_report = write_report(&llm, topic, &summaries, &request.mode, token_tx).await?;
+    let raw_report = write_report(&llm, topic, &summaries, &request.mode, &request.target, token_tx).await?;
     let report = format_report(&raw_report, &summaries);
     on_progress(ProgressEvent::Done);
 

@@ -55,7 +55,11 @@ pub async fn crawl_query(
         let http = http.clone();
         let url = result.url.clone();
         let max_chars = cfg.max_page_chars;
-        async move { fetch_and_extract(&http, &url, max_chars).await }
+        let cookie: Option<String> = {
+            let host = url.split("://").nth(1).unwrap_or("").split('/').next().unwrap_or("");
+            cfg.auth.cookie_for_host(host).map(|c| c.to_string())
+        };
+        async move { fetch_and_extract(&http, &url, max_chars, cookie.as_deref()).await }
     });
 
     let scraped = join_all(futs).await;

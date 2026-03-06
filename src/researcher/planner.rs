@@ -10,8 +10,38 @@ pub async fn generate_queries(
     topic: &str,
     max_queries: usize,
     domains: &[String],
+    target: &crate::researcher::pipeline::ResearchTarget,
 ) -> Result<Vec<String>> {
     info!(%topic, "planning research queries");
+
+    use crate::researcher::pipeline::{ResearchTarget, PersonMethod};
+
+    let system_prompt = match target {
+        ResearchTarget::Person { method } => {
+            let focus = match method {
+                PersonMethod::Company  => "professional background, career, expertise, public work, and thought leadership",
+                PersonMethod::Personal => "personal interests, hobbies, lifestyle, and online presence",
+                PersonMethod::Both     => "both professional background and personal interests/hobbies",
+            };
+            format!(
+                "You are a research planning assistant specializing in people research. \
+                 Generate focused search queries to build a profile of a person — covering their {focus}. \
+                 Use their name in every query. Be specific and targeted."
+            )
+        }
+        ResearchTarget::Company => {
+            "You are a research planning assistant specializing in company research. \
+             Generate focused search queries covering: what the company does, its size and funding stage, \
+             recent news and launches, culture and values, and strategic priorities. \
+             Use the company name in every query.".to_string()
+        }
+        ResearchTarget::Topic => {
+            "You are a research planning assistant. Your job is to decompose a research \
+             topic into specific, focused search queries that together will provide \
+             comprehensive coverage of the topic. Each query should target a different \
+             angle or subtopic. Be specific and use natural language search terms.".to_string()
+        }
+    };
 
     let domain_instruction = if !domains.is_empty() {
         let domain_list = domains
@@ -30,12 +60,7 @@ pub async fn generate_queries(
     };
 
     let messages = vec![
-        ChatMessage::system(
-            "You are a research planning assistant. Your job is to decompose a research \
-             topic into specific, focused search queries that together will provide \
-             comprehensive coverage of the topic. Each query should target a different \
-             angle or subtopic. Be specific and use natural language search terms.",
-        ),
+        ChatMessage::system(system_prompt),
         ChatMessage::user(format!(
             "Research topic: {topic}\n\n\
              Generate exactly {max_queries} distinct search queries to research this topic \

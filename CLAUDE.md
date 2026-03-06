@@ -126,6 +126,10 @@ query → planner (LLM) → [search+scrape]×N → embed-dedup+rerank → [summa
 | `RESEARCH_MODE`   | `report` | Research depth: quick, summary, report, deep |
 | `DOMAIN_PROFILE`  | `` | Named profile from profiles.toml (e.g. shopping-ro) |
 | `DOMAINS`         | `` | Comma-separated domain override |
+| `LINKEDIN_COOKIE` | `` | Cookie header for linkedin.com (optional auth) |
+| `FB_COOKIE` | `` | Cookie header for facebook.com (optional auth) |
+| `INSTAGRAM_COOKIE` | `` | Cookie header for instagram.com (optional auth) |
+| `TWITTER_COOKIE` | `` | Cookie header for twitter.com / x.com (optional auth) |
 
 ## Model Download
 
