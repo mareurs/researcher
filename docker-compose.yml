@@ -50,11 +50,11 @@ services:
     networks:
       - researcher-net
     ports:
-      - "8080:8080"
+      - "30080:8080"
     volumes:
-      - llama-models:/models
+      - /home/marius/.lmstudio/models:/models:ro
     environment:
-      - LLAMA_ARG_MODEL=/models/${LLAMA_MODEL:-Qwen_Qwen3.5-9B-Q4_K_M.gguf}
+      - LLAMA_ARG_MODEL=/models/${LLAMA_MODEL:-lmstudio-community/DeepSeek-R1-Distill-Qwen-7B-GGUF/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf}
       - LLAMA_ARG_HOST=0.0.0.0
       - LLAMA_ARG_PORT=8080
       - LLAMA_ARG_CTX_SIZE=${LLAMA_CTX_SIZE:-8192}
