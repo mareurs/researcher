@@ -144,3 +144,59 @@ pub fn format_report(report: &str, summaries: &[SourceSummary]) -> String {
 
     format!("{}\n\n## Sources\n\n{}", report, sources)
 }
+
+pub async fn write_code_report(
+    llm: &LlmClient,
+    summaries: &[SourceSummary],
+    framework: &str,
+    version: &str,
+    aspects: &[String],
+) -> Result<String> {
+    info!(sources = summaries.len(), "writing code research report");
+
+    let sources_text = summaries
+        .iter()
+        .enumerate()
+        .map(|(i, s)| format!(
+            "--- Source {} ---\nURL: {}\nAspect searched: {}\nSummary:\n{}\n",
+            i + 1, s.url, s.query, s.summary,
+        ))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let sections: Vec<&str> = aspects.iter().filter_map(|a| match a.as_str() {
+        "bugs"      => Some("## Known Bugs & Issues\nRecent or notable bugs, regressions, and open issues. Include issue numbers and links where available."),
+        "changelog" => Some("## Changelog & Breaking Changes\nRecent releases, notable changes, and any breaking changes since the specified version."),
+        "community" => Some("## Community Sentiment\nRecent Reddit/HN discussions, developer opinions, pain points, and common complaints or praise."),
+        "releases"  => Some("## Releases\nRecent release history with dates, version numbers, and highlights."),
+        _           => None,
+    }).collect();
+
+    let section_instructions = sections.join("\n\n");
+
+    if sections.is_empty() {
+        return Ok("No valid aspects provided. Use: bugs, changelog, community, releases.".to_string());
+    }
+
+    let prompt = format!(
+        "You are a developer-focused research analyst. Write a concise technical report on **{framework} {version}**.\n\
+         Cover only these sections (skip any section if no relevant information was found in the sources):\n\n\
+         {section_instructions}\n\n\
+         Rules:\n\
+         - Be specific: include version numbers, dates, issue numbers, PR links\n\
+         - Cite sources inline with [N] notation\n\
+         - Skip sections with no relevant data rather than speculating\n\
+         - No fluff, no introductions, no conclusions — just the sections\n\n\
+         Research gathered:\n{sources_text}"
+    );
+
+    let messages = vec![
+        ChatMessage::system(
+            "You are a concise technical research analyst specialising in software frameworks \
+             and libraries. Write only what the sources support. Cite inline with [N] notation.",
+        ),
+        ChatMessage::user(prompt),
+    ];
+
+    llm.complete(messages).await
+}
