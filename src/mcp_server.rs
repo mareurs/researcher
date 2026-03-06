@@ -260,6 +260,79 @@ impl ResearcherServer {
         }
     }
 
+
+    #[tool(description = "Research a framework or library: known bugs, changelogs, breaking changes, \
+releases, and community sentiment. \
+aspects: bugs, changelog, community, releases — pass one or more (default: bugs+changelog+community). \
+repo: GitHub slug e.g. 'tokio-rs/tokio' — anchors bug/release queries to GitHub issues/releases. \
+version: e.g. '0.8' — defaults to 'latest'. \
+Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
+    async fn research_code(
+        &self,
+        Parameters(input): Parameters<CodeResearchInput>,
+    ) -> String {
+        use crate::researcher::crawler::crawl_all;
+        use crate::researcher::summarizer::summarize_all;
+        use crate::researcher::publisher::write_code_report;
+        use crate::llm::client::LlmClient;
+
+        let version = input.version.as_deref().unwrap_or("latest");
+        let framework = &input.framework;
+        let aspects = input.aspects.unwrap_or_else(|| {
+            vec!["bugs".to_string(), "changelog".to_string(), "community".to_string()]
+        });
+
+        // Build query list from templates — no LLM planner call
+        let mut queries: Vec<String> = Vec::new();
+        for aspect in &aspects {
+            match aspect.as_str() {
+                "bugs" => {
+                    queries.push(format!("{framework} {version} bug issue"));
+                    if let Some(repo) = &input.repo {
+                        queries.push(format!("{framework} {version} issue site:github.com/{repo}/issues"));
+                    }
+                }
+                "changelog" => {
+                    queries.push(format!("{framework} {version} changelog release notes"));
+                    queries.push(format!("{framework} {version} breaking changes"));
+                }
+                "community" => {
+                    queries.push(format!("{framework} {version} site:reddit.com"));
+                    queries.push(format!("{framework} {version} site:news.ycombinator.com"));
+                }
+                "releases" => {
+                    queries.push(format!("{framework} {version} release"));
+                    if let Some(repo) = &input.repo {
+                        queries.push(format!("{framework} {version} site:github.com/{repo}/releases"));
+                    }
+                }
+                _ => {} // silently skip unknown aspects
+            }
+        }
+
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap();
+        let llm = LlmClient::new(&self.cfg);
+        let topic = format!("{framework} {version}");
+
+        let sources = crawl_all(&http, &self.cfg, &queries).await;
+        if sources.is_empty() {
+            return format!("Error: no sources found for {framework} {version}");
+        }
+
+        let summaries = summarize_all(&llm, &sources, &topic).await;
+        if summaries.is_empty() {
+            return format!("Error: could not summarize sources for {framework} {version}");
+        }
+
+        match write_code_report(&llm, &summaries, framework, version, &aspects).await {
+            Ok(report) => report,
+            Err(e)     => format!("Error writing report: {e:#}"),
+        }
+    }
+
 }
 
 #[tool_handler]
