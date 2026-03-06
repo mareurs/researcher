@@ -1,0 +1,60 @@
+[package]
+name = "researcher"
+version = "0.1.0"
+edition = "2021"
+description = "Fast AI research agent in Rust — local GPU or OpenAI"
+
+[[bin]]
+name = "researcher"
+path = "src/main.rs"
+
+[[bin]]
+name = "researcher-mcp"
+path = "src/mcp_server.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# HTML scraping
+scraper = "0.21"
+
+# Web server
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Streaming SSE
+tokio-stream = "0.1"
+eventsource-stream = "0.2"
+
+# MCP server
+rmcp = { version = "1.1", features = ["server", "transport-io", "macros"] }
+
+# Utilities
+anyhow = "1"
+thiserror = "2"
+url = "2"
+regex = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
