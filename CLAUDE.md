@@ -130,6 +130,9 @@ query → planner (LLM) → [search+scrape]×N → embed-dedup+rerank → [summa
 | `FB_COOKIE` | `` | Cookie header for facebook.com (optional auth) |
 | `INSTAGRAM_COOKIE` | `` | Cookie header for instagram.com (optional auth) |
 | `TWITTER_COOKIE` | `` | Cookie header for twitter.com / x.com (optional auth) |
+| `ADZUNA_APP_ID`  | `` | Adzuna API app ID (free tier at developer.adzuna.com) |
+| `ADZUNA_APP_KEY` | `` | Adzuna API app key |
+| `ADZUNA_COUNTRY` | `us` | Adzuna API country code (us, gb, de, fr, etc.) |
 
 ## Model Download
 

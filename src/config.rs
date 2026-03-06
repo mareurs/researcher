@@ -122,24 +122,73 @@ pub struct Config {
     /// Per-platform authentication cookies. Not a CLI flag.
     #[clap(skip)]
     pub auth: AuthConfig,
+
+    /// Job search profile loaded from profiles.toml [job-profile]. Not a CLI flag.
+    #[clap(skip)]
+    pub job_profile: Option<JobProfile>,
 }
+
+/// User profile for job search, loaded from the `[job-profile]` section of `profiles.toml`.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct JobProfile {
+    pub title: String,
+    pub seniority: String,
+    pub salary_floor: String,
+    #[serde(default)]
+    pub remote_only: bool,
+    #[serde(default)]
+    pub skills: Vec<String>,
+    #[serde(default)]
+    pub preferred_company_size: String,
+    #[serde(default)]
+    pub avoid_industries: Vec<String>,
+    #[serde(default)]
+    pub about_me: String,
+}
+
+/// Load the `[job-profile]` section from `profiles.toml`.
+/// Returns `None` if the file is missing, the section is absent, or it fails to parse.
+pub fn load_job_profile() -> Option<JobProfile> {
+    let content = match std::fs::read_to_string("profiles.toml") {
+        Ok(c) => c,
+        Err(_) => {
+            tracing::debug!("profiles.toml not found — job profile unavailable");
+            return None;
+        }
+    };
+    let table: toml::Table = toml::from_str(&content).ok()?;
+    if !table.contains_key("job-profile") {
+        tracing::debug!("no [job-profile] section in profiles.toml — job search disabled");
+        return None;
+    }
+    let section = table.get("job-profile")?;
+    toml::Value::try_into(section.clone())
+        .inspect_err(|e| tracing::warn!(error = %e, "failed to parse [job-profile] section"))
+        .ok()
+}
+
 
 /// Load domain profiles from `profiles.toml` in the current directory.
 /// Returns empty map if the file is missing or malformed.
 pub fn load_profiles() -> std::collections::HashMap<String, Vec<String>> {
-    #[derive(serde::Deserialize)]
-    struct ProfileEntry {
-        domains: Vec<String>,
-    }
-
     let Ok(content) = std::fs::read_to_string("profiles.toml") else {
         return Default::default();
     };
-    match toml::from_str::<std::collections::HashMap<String, ProfileEntry>>(&content) {
-        Ok(raw) => raw.into_iter().map(|(k, v)| (k, v.domains)).collect(),
+    let table: toml::Table = match toml::from_str(&content) {
+        Ok(t) => t,
         Err(e) => {
             tracing::warn!("profiles.toml parse failed: {e} — using empty profiles");
-            Default::default()
+            return Default::default();
+        }
+    };
+    let mut profiles = std::collections::HashMap::new();
+    for (key, value) in table {
+        // Skip non-domain-profile sections (e.g. [job-profile])
+        if let Some(domains_val) = value.get("domains") {
+            if let Ok(domains) = domains_val.clone().try_into::<Vec<String>>() {
+                profiles.insert(key, domains);
+            }
         }
     }
+    profiles
 }
