@@ -1,5 +1,31 @@
 use clap::Parser;
 
+#[derive(Debug, Clone, Default)]
+pub struct AuthConfig {
+    pub linkedin_cookie:  Option<String>,
+    pub fb_cookie:        Option<String>,
+    pub instagram_cookie: Option<String>,
+    pub twitter_cookie:   Option<String>,
+}
+
+impl AuthConfig {
+    /// Return the Cookie header value for the given hostname, if configured.
+    pub fn cookie_for_host(&self, host: &str) -> Option<&str> {
+        if host.contains("linkedin.com") {
+            self.linkedin_cookie.as_deref()
+        } else if host.contains("facebook.com") {
+            self.fb_cookie.as_deref()
+        } else if host.contains("instagram.com") {
+            self.instagram_cookie.as_deref()
+        } else if host.contains("twitter.com") || host == "x.com" || host.ends_with(".x.com") {
+            self.twitter_cookie.as_deref()
+        } else {
+            None
+        }
+    }
+}
+
+
 /// Researcher config — all values can come from env vars or CLI flags.
 #[derive(Debug, Clone, Parser)]
 #[command(name = "researcher", about = "Fast AI research agent")]
@@ -92,6 +118,10 @@ pub struct Config {
     /// Domain profiles loaded from profiles.toml at startup. Not a CLI flag.
     #[clap(skip)]
     pub profiles: std::collections::HashMap<String, Vec<String>>,
+
+    /// Per-platform authentication cookies. Not a CLI flag.
+    #[clap(skip)]
+    pub auth: AuthConfig,
 }
 
 /// Load domain profiles from `profiles.toml` in the current directory.

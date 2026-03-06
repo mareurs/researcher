@@ -36,7 +36,7 @@ use serde::Deserialize;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use config::Config;
-use researcher::pipeline::run;
+
 
 // ── Tool input schemas ────────────────────────────────────────────────────────
 
@@ -61,6 +61,24 @@ pub struct ResearchInput {
     pub max_sources: Option<usize>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PersonResearchInput {
+    #[schemars(description = "Full name of the person to research, e.g. 'Maria Ionescu'")]
+    pub name: String,
+
+    #[schemars(description = "Research focus: 'company' (professional background), 'personal' (interests/lifestyle), or 'both' (default)")]
+    pub method: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CompanyResearchInput {
+    #[schemars(description = "Company name to research, e.g. 'Acme Corp'")]
+    pub name: String,
+
+    #[schemars(description = "Optional country to narrow results, e.g. 'Romania'")]
+    pub country: Option<String>,
+}
+
 // ── Server struct ─────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -83,7 +101,7 @@ impl ResearcherServer {
         &self,
         Parameters(input): Parameters<ResearchInput>,
     ) -> String {
-        use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest};
+        use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest, ResearchTarget};
 
         let mode = match input.mode.as_deref().unwrap_or("report") {
             "quick"   => ResearchMode::Quick,
@@ -101,6 +119,7 @@ impl ResearcherServer {
             mode,
             domains: input.domains.unwrap_or_default(),
             domain_profile: input.domain_profile,
+            target: ResearchTarget::default(),
         };
 
         match run(
@@ -114,6 +133,74 @@ impl ResearcherServer {
             Err(e) => format!("Error: {e:#}"),
         }
     }
+
+    #[tool(description = "Research a person for meeting prep. Returns a markdown brief covering professional background, career, public voice, conversation hooks, and/or personal interests depending on 'method'. Sources: LinkedIn, Twitter/X, GitHub, Facebook, Instagram, Reddit, and more.")]
+    async fn research_person(
+        &self,
+        Parameters(input): Parameters<PersonResearchInput>,
+    ) -> String {
+        use crate::researcher::pipeline::{
+            run, ResearchMode, ResearchRequest, ResearchTarget, PersonMethod,
+        };
+
+        let method: PersonMethod = input.method
+            .as_deref()
+            .unwrap_or("both")
+            .parse()
+            .unwrap_or(PersonMethod::Both);
+
+        let request = ResearchRequest {
+            topic: input.name,
+            mode: ResearchMode::Report,
+            domains: vec![],
+            domain_profile: None,
+            target: ResearchTarget::Person { method },
+        };
+
+        match run(
+            &self.cfg,
+            &request,
+            |ev| eprintln!("[researcher] {ev}"),
+            None,
+        ).await {
+            Ok(r)  => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
+            Err(e) => format!("Error: {e:#}"),
+        }
+    }
+
+    #[tool(description = "Research a company for meeting prep. Returns a markdown brief covering what they do, size & stage, recent news, culture, and strategic context. Sources: LinkedIn, Crunchbase, Bloomberg, Glassdoor, Trustpilot, Wikipedia, and news.")]
+    async fn research_company(
+        &self,
+        Parameters(input): Parameters<CompanyResearchInput>,
+    ) -> String {
+        use crate::researcher::pipeline::{
+            run, ResearchMode, ResearchRequest, ResearchTarget,
+        };
+
+        let topic = match &input.country {
+            Some(c) => format!("{} {}", input.name, c),
+            None    => input.name.clone(),
+        };
+
+        let request = ResearchRequest {
+            topic,
+            mode: ResearchMode::Report,
+            domains: vec![],
+            domain_profile: None,
+            target: ResearchTarget::Company,
+        };
+
+        match run(
+            &self.cfg,
+            &request,
+            |ev| eprintln!("[researcher] {ev}"),
+            None,
+        ).await {
+            Ok(r)  => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
+            Err(e) => format!("Error: {e:#}"),
+        }
+    }
+
 }
 
 #[tool_handler]
@@ -214,5 +301,11 @@ fn config_from_env() -> Config {
         domain_profile: None,
         cli_domains: vec![],
         profiles: crate::config::load_profiles(),
+        auth: config::AuthConfig {
+            linkedin_cookie:  std::env::var("LINKEDIN_COOKIE").ok(),
+            fb_cookie:        std::env::var("FB_COOKIE").ok(),
+            instagram_cookie: std::env::var("INSTAGRAM_COOKIE").ok(),
+            twitter_cookie:   std::env::var("TWITTER_COOKIE").ok(),
+        },
     }
 }

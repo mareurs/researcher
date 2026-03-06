@@ -30,7 +30,7 @@ pub struct ResearchBody {
 }
 
 fn into_pipeline_request(body: ResearchBody) -> crate::researcher::pipeline::ResearchRequest {
-    use crate::researcher::pipeline::{ResearchMode, ResearchRequest};
+    use crate::researcher::pipeline::{ResearchMode, ResearchRequest, ResearchTarget};
     let mode = match body.mode.as_deref().unwrap_or("report") {
         "quick"   => ResearchMode::Quick,
         "summary" => ResearchMode::Summary,
@@ -42,6 +42,7 @@ fn into_pipeline_request(body: ResearchBody) -> crate::researcher::pipeline::Res
         mode,
         domains: body.domains.unwrap_or_default(),
         domain_profile: body.domain_profile,
+        target: ResearchTarget::default(),
     }
 }
 

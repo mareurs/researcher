@@ -12,7 +12,7 @@ use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use config::Config;
-use researcher::pipeline::{self, run};
+use researcher::pipeline;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,6 +24,12 @@ async fn main() -> anyhow::Result<()> {
 
     let mut cfg = Config::parse();
     cfg.profiles = crate::config::load_profiles();
+    cfg.auth = config::AuthConfig {
+        linkedin_cookie:  std::env::var("LINKEDIN_COOKIE").ok(),
+        fb_cookie:        std::env::var("FB_COOKIE").ok(),
+        instagram_cookie: std::env::var("INSTAGRAM_COOKIE").ok(),
+        twitter_cookie:   std::env::var("TWITTER_COOKIE").ok(),
+    };
 
     if cfg.server {
         run_server(cfg).await
@@ -44,7 +50,7 @@ async fn run_server(cfg: Config) -> anyhow::Result<()> {
 }
 
 async fn run_cli(cfg: Config) -> anyhow::Result<()> {
-    use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest};
+    use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest, ResearchTarget};
 
     let topic = cfg
         .query
@@ -65,6 +71,7 @@ async fn run_cli(cfg: Config) -> anyhow::Result<()> {
         mode,
         domains: cfg.cli_domains.clone(),
         domain_profile: cfg.domain_profile.clone(),
+        target: ResearchTarget::default(),
     };
 
     // Token channel — print each token to stdout as it arrives
