@@ -48,3 +48,19 @@ domains = [
   "lonelyplanet.com",
   "wikivoyage.org",
 ]
+
+# ── Job search profile ────────────────────────────────────────────────────────
+# Used by the search_jobs MCP tool. Edit to match your background.
+[job-profile]
+title = "Senior AI Engineer"
+seniority = "senior"
+salary_floor = "150000 USD"
+remote_only = true
+skills = ["Rust", "Python", "LLMs", "MLOps", "fine-tuning", "inference", "RAG", "transformers"]
+preferred_company_size = "startup to mid-size"
+avoid_industries = ["gambling", "crypto", "adult content"]
+about_me = """
+AI engineer with 5+ years building production ML systems. Specialised in LLM
+inference optimisation, RAG pipelines, and Rust-based AI tooling. Looking for
+technically deep roles with autonomy and meaningful AI impact.
+"""

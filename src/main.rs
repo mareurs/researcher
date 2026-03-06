@@ -1,5 +1,6 @@
 mod config;
 mod embeddings;
+mod jobs;
 mod llm;
 mod researcher;
 mod scraper;
@@ -30,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
         instagram_cookie: std::env::var("INSTAGRAM_COOKIE").ok(),
         twitter_cookie:   std::env::var("TWITTER_COOKIE").ok(),
     };
+    cfg.job_profile = config::load_job_profile();
 
     if cfg.server {
         run_server(cfg).await

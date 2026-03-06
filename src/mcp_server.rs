@@ -18,6 +18,7 @@
 
 mod config;
 mod embeddings;
+mod jobs;
 mod llm;
 mod researcher;
 mod scraper;
@@ -77,6 +78,15 @@ pub struct CompanyResearchInput {
 
     #[schemars(description = "Optional country to narrow results, e.g. 'Romania'")]
     pub country: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct JobSearchInput {
+    #[schemars(description = "Job search query, e.g. 'LLM inference engineer' or 'AI research Rust'")]
+    pub query: String,
+
+    #[schemars(description = "Output mode: 'list' (ranked shortlist, default) or 'deep' (shortlist + company briefs for top 5)")]
+    pub mode: Option<String>,
 }
 
 // ── Server struct ─────────────────────────────────────────────────────────────
@@ -201,6 +211,43 @@ impl ResearcherServer {
         }
     }
 
+    #[tool(description = "Search for remote AI engineering jobs matching your profile in profiles.toml [job-profile]. Returns a ranked markdown report. mode='list' for a quick shortlist (default), mode='deep' for full inline company briefs on top 5 matches. Sources: Remotive, Adzuna (if ADZUNA_APP_ID/KEY set), SearXNG.")]
+    async fn search_jobs(
+        &self,
+        Parameters(input): Parameters<JobSearchInput>,
+    ) -> String {
+        use crate::jobs::fetcher::fetch_jobs;
+        use crate::jobs::scorer::score_listings;
+        use crate::jobs::publisher::write_job_report;
+        use crate::llm::client::LlmClient;
+
+        let profile = match &self.cfg.job_profile {
+            Some(p) => p.clone(),
+            None => return "Error: no [job-profile] section found in profiles.toml. \
+                            Add one to enable job search.".to_string(),
+        };
+
+        let deep = input.mode.as_deref() == Some("deep");
+
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap();
+        let llm = LlmClient::new(&self.cfg);
+
+        let listings = fetch_jobs(&http, &self.cfg, &input.query, &profile).await;
+
+        let scored = match score_listings(&llm, &listings, &profile, 6).await {
+            Ok(s) => s,
+            Err(e) => return format!("Error scoring listings: {e:#}"),
+        };
+
+        match write_job_report(&self.cfg, &scored, &input.query, deep).await {
+            Ok(report) => report,
+            Err(e) => format!("Error writing report: {e:#}"),
+        }
+    }
+
 }
 
 #[tool_handler]
@@ -307,5 +354,6 @@ fn config_from_env() -> Config {
             instagram_cookie: std::env::var("INSTAGRAM_COOKIE").ok(),
             twitter_cookie:   std::env::var("TWITTER_COOKIE").ok(),
         },
+        job_profile: config::load_job_profile(),
     }
 }
