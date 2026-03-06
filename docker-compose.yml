@@ -31,8 +31,7 @@ services:
     ports:
       - "4000:8080"
     volumes:
-      - searxng-data:/etc/searxng
-      - ./config/searxng:/etc/searxng/settings:ro
+      - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
       - SEARXNG_BASE_URL=http://localhost:4000/
     restart: unless-stopped
