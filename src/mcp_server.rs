@@ -351,11 +351,29 @@ impl ServerHandler for ResearcherServer {
                 .build(),
         )
         .with_instructions(
-            "AI research agent. Given a topic, it generates search queries, \
-             scrapes and summarizes sources, and produces a comprehensive \
-             markdown report with citations. Backed by a local Qwen3.5-9B \
-             model via llama.cpp or any OpenAI-compatible endpoint."
-                .to_string(),
+            "AI research agent — 5 tools:\n\
+             \n\
+             • research(query, mode?, domain_profile?, domains?, max_queries?, max_sources?)\n\
+               General web research. Modes: quick=snippets, summary=bullets, report=full markdown (default), deep=thorough.\n\
+               Profiles: shopping-ro, tech-news, llm-news, academic, news, travel. Or pass domains:[\"example.com\"] to pin sites.\n\
+             \n\
+             • research_person(name, method?)\n\
+               Meeting prep brief on any person. Covers career, public voice, interests, conversation hooks.\n\
+               method: professional | personal | both (default). Sources: LinkedIn, X, GitHub, Facebook, Instagram, Reddit.\n\
+             \n\
+             • research_company(name, country?)\n\
+               Meeting prep brief on a company. Covers what they do, size/stage, news, culture, strategy.\n\
+               Sources: LinkedIn, Crunchbase, Bloomberg, Glassdoor, Trustpilot, Wikipedia.\n\
+             \n\
+             • search_jobs(query, mode?)\n\
+               Find remote AI engineering jobs matching your profiles.toml [job-profile].\n\
+               mode: list=shortlist (default), deep=full company briefs on top 5. Sources: Remotive, Adzuna, SearXNG.\n\
+             \n\
+             • research_code(framework, version?, aspects?, repo?, query?)\n\
+               Research a library/framework: bugs, breaking changes, releases, community sentiment.\n\
+               aspects: bugs | changelog | community | releases (default: bugs+changelog+community).\n\
+               query: keyword to narrow, e.g. \"middleware timeout\". repo: GitHub slug e.g. \"tokio-rs/axum\".\n\
+             ".to_string(),
         )
     }
 }
