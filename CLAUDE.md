@@ -13,6 +13,16 @@ cargo check                                  # fast type-check, no link
 
 Release profile uses LTO + strip — binary is ~6-7MB.
 
+## Testing via MCP After Code Changes
+
+The `researcher-mcp` binary is loaded once when the MCP server starts. After modifying source code:
+
+1. `cargo build --release` — wait for it to finish (LTO takes ~30-60s)
+2. Restart the MCP server — in Claude Code: `/mcp` → restart, or restart the session
+3. The new binary will be picked up on next tool call
+
+**Do not test via the `mcp__researcher__*` tools without rebuilding first** — you'll be running the old binary.
+
 ## Running Locally (no Docker)
 
 ```bash
@@ -96,6 +106,10 @@ query → planner (LLM) → [search+scrape]×N → embed-dedup+rerank → [summa
 **Search fallback**: SearXNG → DuckDuckGo Lite (automatic, no config needed).
 
 **MCP server**: stdio transport, `#[tool_router]` / `#[tool]` macros from `rmcp = "1.1"`. No streaming — returns complete report. All logging to stderr.
+
+## MCP Server Instructions Rule
+
+**Every time a new tool is added to `researcher-mcp`, update `get_info()` in `src/mcp_server.rs`** to add a one-line bullet for the new tool in the `with_instructions(...)` block. The instructions must always enumerate all available tools with their signatures and key parameters so the LLM host can pick the right tool without guessing.
 
 ## Codescout Rules (enforced by hooks)
 
