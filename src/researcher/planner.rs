@@ -39,7 +39,11 @@ pub async fn generate_queries(
             "You are a research planning assistant. Your job is to decompose a research \
              topic into specific, focused search queries that together will provide \
              comprehensive coverage of the topic. Each query should target a different \
-             angle or subtopic. Be specific and use natural language search terms.".to_string()
+             angle or subtopic. Be specific and use natural language search terms. \
+             IMPORTANT: If the topic contains ambiguous terms that could refer to multiple \
+             things (e.g. a programming language name that is also a common word or product), \
+             always include disambiguating context in every query — for example, prefer \
+             'Rust programming language async' over just 'Rust async'.".to_string()
         }
     };
 
