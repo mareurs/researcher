@@ -94,16 +94,21 @@ pub fn filter_sources(
         .into_iter()
         .filter_map(|source| {
             let quality = assess_quality(&source, target);
+            let is_snippet_fallback = source.raw_html_len == 0;
 
-            if source.word_count < cfg.min_content_words {
+            // Snippet fallbacks get a relaxed word count threshold — they're short
+            // by nature but still carry useful information from search results.
+            let min_words = if is_snippet_fallback { 8 } else { cfg.min_content_words };
+
+            if source.word_count < min_words {
                 debug!(url = %source.url, words = source.word_count, "quality: dropping thin content");
                 return None;
             }
-            if source.paywall_detected {
+            if !is_snippet_fallback && source.paywall_detected {
                 debug!(url = %source.url, "quality: dropping paywalled content");
                 return None;
             }
-            if quality.text_density < cfg.min_text_density {
+            if !is_snippet_fallback && quality.text_density < cfg.min_text_density {
                 debug!(url = %source.url, density = quality.text_density, "quality: dropping low-density page");
                 return None;
             }
