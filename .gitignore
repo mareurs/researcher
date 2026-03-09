@@ -3,3 +3,4 @@
 .codescout/private-memories/
 .codescout/embeddings.db
 .codescout/usage.db
+.worktrees/
