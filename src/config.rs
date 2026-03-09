@@ -85,6 +85,32 @@ pub struct Config {
     #[arg(long, env = "DEDUP_THRESHOLD", default_value = "0.92")]
     pub dedup_threshold: f32,
 
+    // ── Reranker ─────────────────────────────────────────────────────────────
+    /// TEI cross-encoder reranker base URL (empty = disable reranking)
+    #[arg(long, env = "RERANK_BASE_URL", default_value = "")]
+    pub rerank_base_url: String,
+
+    /// Weight for cross-encoder relevance score in combined ranking
+    #[arg(long, env = "RERANK_RELEVANCE_WEIGHT", default_value = "0.7")]
+    pub rerank_relevance_weight: f32,
+
+    /// Weight for domain authority in combined ranking
+    #[arg(long, env = "RERANK_AUTHORITY_WEIGHT", default_value = "0.2")]
+    pub rerank_authority_weight: f32,
+
+    /// Weight for content quality heuristics in combined ranking
+    #[arg(long, env = "RERANK_QUALITY_WEIGHT", default_value = "0.1")]
+    pub rerank_quality_weight: f32,
+
+    // ── Quality filter ───────────────────────────────────────────────────────
+    /// Minimum word count for a source to pass quality filter
+    #[arg(long, env = "MIN_CONTENT_WORDS", default_value = "100")]
+    pub min_content_words: usize,
+
+    /// Minimum text/HTML density ratio for quality filter
+    #[arg(long, env = "MIN_TEXT_DENSITY", default_value = "0.05")]
+    pub min_text_density: f32,
+
     // ── Research pipeline ────────────────────────────────────────────────────
     /// Max sub-questions the planner generates
     #[arg(long, env = "MAX_SEARCH_QUERIES", default_value = "4")]
@@ -129,6 +155,7 @@ pub struct Config {
 }
 
 /// User profile for job search, loaded from the `[job-profile]` section of `profiles.toml`.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct JobProfile {
     pub title: String,

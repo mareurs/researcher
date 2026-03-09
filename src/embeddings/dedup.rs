@@ -23,10 +23,11 @@ pub async fn deduplicate(
         return sources;
     }
 
-    // Use first 512 chars of content as the embedding input (TEI truncates anyway)
+    // Use first ~2000 chars of content as embedding input.
+    // BGE-large-en-v1.5 handles 512 tokens (~2000 chars); TEI --auto-truncate handles overshoot.
     let texts: Vec<String> = sources
         .iter()
-        .map(|s| s.content.chars().take(512).collect())
+        .map(|s| s.content.chars().take(2000).collect())
         .collect();
 
     let embeddings = match client.embed(&texts).await {
@@ -61,41 +62,5 @@ pub async fn deduplicate(
     result
 }
 
-/// Score each source by cosine similarity to the research topic query.
-/// Returns sources reranked by relevance (highest first).
-/// Falls back to original order if embedding fails.
-pub async fn rank_by_relevance(
-    client: &EmbedClient,
-    query: &str,
-    sources: Vec<ScrapedSource>,
-) -> Vec<ScrapedSource> {
-    if sources.is_empty() {
-        return sources;
-    }
 
-    // Embed query + all source snippets in one batch
-    let mut texts = vec![query.chars().take(512).collect::<String>()];
-    texts.extend(sources.iter().map(|s| s.content.chars().take(512).collect::<String>()));
-
-    let embeddings = match client.embed(&texts).await {
-        Ok(e) => e,
-        Err(err) => {
-            tracing::warn!(%err, "relevance scoring failed, keeping original order");
-            return sources;
-        }
-    };
-
-    let query_emb = &embeddings[0];
-    let mut scored: Vec<(f32, ScrapedSource)> = embeddings[1..]
-        .iter()
-        .zip(sources)
-        .map(|(emb, src)| (cosine(query_emb, emb), src))
-        .collect();
-
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-
-    let result: Vec<ScrapedSource> = scored.into_iter().map(|(_, s)| s).collect();
-    debug!(count = result.len(), "sources reranked by relevance");
-    result
-}
 

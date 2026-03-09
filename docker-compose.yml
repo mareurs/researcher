@@ -20,6 +20,7 @@ volumes:
   llama-models:
   searxng-data:
   tei-embed-cache:
+  tei-rerank-cache:
 
 services:
   # ── SearXNG: private metasearch, no API key required ──────────────────────
@@ -103,6 +104,33 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  # ── TEI: Cross-encoder reranker (for source relevance scoring) ─────────────
+  # Lightweight cross-encoder (~80MB VRAM). Runs alongside tei-embed.
+  tei-rerank:
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
+    container_name: tei-rerank
+    networks:
+      - researcher-net
+    ports:
+      - "8082:80"
+    command: --model-id cross-encoder/ms-marco-MiniLM-L-6-v2 --port 80 --auto-truncate --max-concurrent-requests 32
+    volumes:
+      - tei-rerank-cache:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
   # ── Researcher: Rust binary ────────────────────────────────────────────────
   researcher:
     build:
@@ -126,6 +154,8 @@ services:
       - EMBED_BASE_URL=http://tei-embed:80
       - EMBED_MODEL=${EMBED_MODEL:-BAAI/bge-large-en-v1.5}
       - DEDUP_THRESHOLD=${DEDUP_THRESHOLD:-0.92}
+      # Reranking (TEI cross-encoder)
+      - RERANK_BASE_URL=http://tei-rerank:80
       # Research config
       - MAX_SEARCH_QUERIES=${MAX_SEARCH_QUERIES:-4}
       - MAX_SOURCES_PER_QUERY=${MAX_SOURCES_PER_QUERY:-4}
@@ -134,5 +164,7 @@ services:
       searxng:
         condition: service_started
       tei-embed:
+        condition: service_healthy
+      tei-rerank:
         condition: service_healthy
     restart: unless-stopped

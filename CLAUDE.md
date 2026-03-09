@@ -83,9 +83,7 @@ static/
 ## Pipeline Flow
 
 ```
-query → planner (LLM) → [search+scrape]×N → embed-dedup+rerank → [summarize]×M (concurrent) → publisher (LLM)
-                                                     ↑                      ↑
-                                               optional TEI          join_all (parallel)
+query → planner (LLM) → [search+scrape]×N → quality filter → embed-dedup → cross-encoder rerank → [summarize+judge]×M → publisher (LLM)
 ```
 
 `run()` signature: `run(cfg, topic, on_progress: Fn(ProgressEvent), token_tx: Option<Sender<String>>)`
@@ -132,6 +130,12 @@ query → planner (LLM) → [search+scrape]×N → embed-dedup+rerank → [summa
 | `SEARCH_RESULTS_PER_QUERY` | `8` | Results fetched per sub-question |
 | `EMBED_BASE_URL` | `` (disabled) | TEI URL; empty = skip dedup |
 | `DEDUP_THRESHOLD` | `0.92` | Cosine sim cutoff for dedup |
+| `RERANK_BASE_URL` | `` (disabled) | TEI cross-encoder URL; empty = skip reranking |
+| `RERANK_RELEVANCE_WEIGHT` | `0.7` | Cross-encoder score weight in combined ranking |
+| `RERANK_AUTHORITY_WEIGHT` | `0.2` | Domain authority weight in combined ranking |
+| `RERANK_QUALITY_WEIGHT` | `0.1` | Content quality weight in combined ranking |
+| `MIN_CONTENT_WORDS` | `100` | Quality filter: minimum word count |
+| `MIN_TEXT_DENSITY` | `0.05` | Quality filter: minimum text/HTML density ratio |
 | `MAX_SEARCH_QUERIES` | `4` | Sub-questions from planner |
 | `MAX_SOURCES_PER_QUERY` | `4` | Pages scraped per query |
 | `MAX_PAGE_CHARS` | `8000` | Max chars extracted per page |

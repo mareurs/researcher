@@ -32,10 +32,9 @@ struct Delta {
     content: Option<String>,
 }
 
-/// Stream chat completion tokens over an mpsc channel.
-/// Returns a receiver that yields token strings as they arrive.
 /// Stream chat completion tokens via SSE, forwarding each token to `tx`.
 /// Also accumulates the full response and returns it when complete.
+#[allow(clippy::too_many_arguments)]
 pub async fn stream_completion(
     http: &Client,
     base_url: &str,
