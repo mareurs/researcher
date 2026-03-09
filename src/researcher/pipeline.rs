@@ -4,9 +4,11 @@ use tracing::info;
 
 use crate::config::Config;
 use crate::embeddings::client::EmbedClient;
-use crate::embeddings::dedup::{deduplicate, rank_by_relevance};
+use crate::embeddings::dedup::deduplicate;
+use crate::embeddings::reranker::RerankerClient;
+use crate::researcher::quality::{assess_quality, filter_sources};
 use crate::llm::client::LlmClient;
-use super::crawler::crawl_all;
+use super::crawler::{crawl_all, ScrapedSource};
 use super::planner::generate_queries;
 use super::publisher::{format_report, write_report};
 use super::summarizer::summarize_all;
@@ -39,15 +41,13 @@ impl std::str::FromStr for PersonMethod {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub enum ResearchTarget {
+    #[default]
     Topic,
     Person { method: PersonMethod },
     Company,
-}
-
-impl Default for ResearchTarget {
-    fn default() -> Self { ResearchTarget::Topic }
 }
 
 pub struct ResearchRequest {
@@ -61,6 +61,7 @@ pub struct ResearchRequest {
 }
 
 impl ResearchRequest {
+    #[allow(dead_code)]
     pub fn new(topic: impl Into<String>) -> Self {
         Self {
             topic: topic.into(),
@@ -199,17 +200,57 @@ pub async fn run(
         });
     }
 
-    // 8. Embedding dedup (if TEI configured)
+    // 8a. Quality filter (always active)
+    on_progress(ProgressEvent::QualityFiltering { total: sources.len() });
+    let quality_sources = filter_sources(sources, &request.target, cfg);
+    info!(sources = quality_sources.len(), "quality filter complete");
+
+    // 8b. Embedding dedup (if TEI configured)
     let sources = if !cfg.embed_base_url.is_empty() {
-        on_progress(ProgressEvent::Deduplicating { total: sources.len() });
+        on_progress(ProgressEvent::Deduplicating { total: quality_sources.len() });
         let embed = EmbedClient::new(&cfg.embed_base_url);
-        let deduped = deduplicate(&embed, sources, cfg.dedup_threshold).await;
-        let ranked = rank_by_relevance(&embed, topic, deduped).await;
-        on_progress(ProgressEvent::CrawlComplete { sources: ranked.len() });
-        ranked
+        let just_sources: Vec<ScrapedSource> = quality_sources.into_iter().map(|(s, _q)| s).collect();
+        let deduped = deduplicate(&embed, just_sources, cfg.dedup_threshold).await;
+
+        // Re-assess quality after dedup (lost annotations during dedup)
+        let quality_sources: Vec<_> = deduped
+            .into_iter()
+            .map(|s| {
+                let q = assess_quality(&s, &request.target);
+                (s, q)
+            })
+            .collect();
+
+        // 8c. Cross-encoder rerank (if reranker configured)
+        if !cfg.rerank_base_url.is_empty() {
+            on_progress(ProgressEvent::Reranking { total: quality_sources.len() });
+            let reranker = RerankerClient::new(&cfg.rerank_base_url);
+            // Clone before passing to rerank since it consumes the vec
+            let fallback: Vec<ScrapedSource> = quality_sources.iter().map(|(s, _)| s.clone()).collect();
+            match reranker.rerank(
+                topic,
+                quality_sources,
+                cfg.rerank_relevance_weight,
+                cfg.rerank_authority_weight,
+                cfg.rerank_quality_weight,
+            ).await {
+                Ok(ranked) => {
+                    on_progress(ProgressEvent::CrawlComplete { sources: ranked.len() });
+                    ranked.into_iter().map(|r| r.source).collect()
+                }
+                Err(e) => {
+                    tracing::warn!(%e, "cross-encoder rerank failed, using dedup order");
+                    on_progress(ProgressEvent::CrawlComplete { sources: fallback.len() });
+                    fallback
+                }
+            }
+        } else {
+            on_progress(ProgressEvent::CrawlComplete { sources: quality_sources.len() });
+            quality_sources.into_iter().map(|(s, _)| s).collect()
+        }
     } else {
-        on_progress(ProgressEvent::CrawlComplete { sources: sources.len() });
-        sources
+        on_progress(ProgressEvent::CrawlComplete { sources: quality_sources.len() });
+        quality_sources.into_iter().map(|(s, _)| s).collect()
     };
 
     // 9. Summarize concurrently
@@ -251,7 +292,9 @@ pub enum ProgressEvent {
     Planning,
     Queries(Vec<String>),
     Crawling { total: usize },
+    QualityFiltering { total: usize },
     Deduplicating { total: usize },
+    Reranking { total: usize },
     CrawlComplete { sources: usize },
     Summarizing { total: usize },
     SummarizingComplete { summaries: usize },
@@ -265,7 +308,9 @@ impl std::fmt::Display for ProgressEvent {
             Self::Planning => write!(f, "🔍 Planning research queries..."),
             Self::Queries(q) => write!(f, "📋 Generated {} search queries", q.len()),
             Self::Crawling { total } => write!(f, "🌐 Crawling {} queries in parallel...", total),
+            Self::QualityFiltering { total } => write!(f, "Filtering {total} sources by quality"),
             Self::Deduplicating { total } => write!(f, "🔗 Deduplicating {} sources...", total),
+            Self::Reranking { total } => write!(f, "Reranking {total} sources"),
             Self::CrawlComplete { sources } => write!(f, "✅ Scraped {} unique sources", sources),
             Self::Summarizing { total } => write!(f, "🧠 Summarizing {} sources concurrently...", total),
             Self::SummarizingComplete { summaries } => write!(f, "✅ {} relevant summaries", summaries),

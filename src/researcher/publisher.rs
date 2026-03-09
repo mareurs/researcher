@@ -145,6 +145,7 @@ pub fn format_report(report: &str, summaries: &[SourceSummary]) -> String {
     format!("{}\n\n## Sources\n\n{}", report, sources)
 }
 
+#[allow(dead_code)]
 pub async fn write_code_report(
     llm: &LlmClient,
     summaries: &[SourceSummary],

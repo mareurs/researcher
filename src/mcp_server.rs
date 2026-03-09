@@ -15,7 +15,6 @@
 ///       }
 ///     }
 ///   }
-
 mod config;
 mod embeddings;
 mod jobs;
@@ -451,6 +450,12 @@ fn config_from_env() -> Config {
         search_results_per_query: env_usize("SEARCH_RESULTS_PER_QUERY", 8),
         embed_base_url: env("EMBED_BASE_URL", ""),
         dedup_threshold: env_f32("DEDUP_THRESHOLD", 0.92),
+        rerank_base_url: env("RERANK_BASE_URL", ""),
+        rerank_relevance_weight: env_f32("RERANK_RELEVANCE_WEIGHT", 0.7),
+        rerank_authority_weight: env_f32("RERANK_AUTHORITY_WEIGHT", 0.2),
+        rerank_quality_weight: env_f32("RERANK_QUALITY_WEIGHT", 0.1),
+        min_content_words: env_usize("MIN_CONTENT_WORDS", 100),
+        min_text_density: env_f32("MIN_TEXT_DENSITY", 0.05),
         max_search_queries: env_usize("MAX_SEARCH_QUERIES", 4),
         max_sources_per_query: env_usize("MAX_SOURCES_PER_QUERY", 4),
         max_page_chars: env_usize("MAX_PAGE_CHARS", 8000),

@@ -64,3 +64,26 @@ AI engineer with 5+ years building production ML systems. Specialised in LLM
 inference optimisation, RAG pipelines, and Rust-based AI tooling. Looking for
 technically deep roles with autonomy and meaningful AI impact.
 """
+
+# ── Domain authority tiers ────────────────────────────────────────────────────
+# Used by the quality filter to weight sources by domain reputation.
+# Tier 1 (1.0): Authoritative sources
+# Tier 2 (0.7): Established outlets
+# Tier 3 (0.5): Community sources
+# Tier 4 (0.3): Default for unlisted domains
+
+[domain-authority]
+tier1 = [
+  "wikipedia.org", "github.com", "arxiv.org", "docs.rs",
+  "doc.rust-lang.org", "developer.mozilla.org", "w3.org",
+  "python.org", "golang.org", "docs.oracle.com",
+]
+tier2 = [
+  "nytimes.com", "bbc.com", "reuters.com", "bloomberg.com",
+  "techcrunch.com", "arstechnica.com", "nature.com",
+  "stackoverflow.com", "wired.com", "theverge.com",
+]
+tier3 = [
+  "reddit.com", "medium.com", "quora.com", "dev.to",
+  "hackernoon.com", "substack.com", "news.ycombinator.com",
+]

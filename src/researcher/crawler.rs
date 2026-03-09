@@ -13,7 +13,27 @@ pub struct ScrapedSource {
     pub title: String,
     pub query: String,
     pub content: String,
+    pub domain: String,
+    pub word_count: usize,
+    pub raw_html_len: usize,
+    pub link_count: usize,
+    pub ad_link_count: usize,
+    pub has_headings: bool,
+    pub has_lists: bool,
+    pub has_code_blocks: bool,
+    pub paywall_detected: bool,
 }
+
+fn domain_from_url(url: &str) -> String {
+    url.split("://")
+        .nth(1)
+        .unwrap_or("")
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .to_lowercase()
+}
+
 
 /// For a single sub-question: search → deduplicate URLs → scrape in parallel.
 pub async fn crawl_query(
@@ -67,16 +87,45 @@ pub async fn crawl_query(
     let sources = fresh
         .into_iter()
         .zip(scraped)
-        .filter_map(|(result, content)| match content {
-            Ok(text) => Some(ScrapedSource {
-                url: result.url,
-                title: result.title,
-                query: query.to_string(),
-                content: text,
-            }),
+        .map(|(result, content)| match content {
+            Ok(page) => {
+                let domain = domain_from_url(&result.url);
+                let word_count = page.text.split_whitespace().count();
+                ScrapedSource {
+                    url: result.url,
+                    title: result.title,
+                    query: query.to_string(),
+                    domain,
+                    word_count,
+                    raw_html_len: page.raw_html_len,
+                    link_count: page.link_count,
+                    ad_link_count: page.ad_link_count,
+                    has_headings: page.has_headings,
+                    has_lists: page.has_lists,
+                    has_code_blocks: page.has_code_blocks,
+                    paywall_detected: page.paywall_detected,
+                    content: page.text,
+                }
+            }
             Err(e) => {
-                warn!(%e, url = %result.url, "scrape failed");
-                None
+                warn!(%e, url = %result.url, "scrape failed, using snippet");
+                let domain = domain_from_url(&result.url);
+                let word_count = result.snippet.split_whitespace().count();
+                ScrapedSource {
+                    url: result.url,
+                    title: result.title,
+                    query: query.to_string(),
+                    domain,
+                    word_count,
+                    raw_html_len: 0,
+                    link_count: 0,
+                    ad_link_count: 0,
+                    has_headings: false,
+                    has_lists: false,
+                    has_code_blocks: false,
+                    paywall_detected: false,
+                    content: result.snippet,
+                }
             }
         })
         .collect();
