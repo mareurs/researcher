@@ -102,6 +102,18 @@ pub struct CodeResearchInput {
     pub query: Option<String>,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct MarketInsightInput {
+    /// Ticker symbol (e.g. "BTC", "NVDA", "$AAPL") or free-form topic
+    /// (e.g. "AI chip stocks", "Ethereum staking post-Shanghai")
+    pub query: String,
+    /// Asset class for domain and prompt selection.
+    /// "stock" | "crypto" | "macro" (default: "macro")
+    pub asset_class: Option<String>,
+    /// Output depth: "quick" | "summary" | "report" (default) | "deep"
+    pub mode: Option<String>,
+}
+
 // ── Server struct ─────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -339,6 +351,54 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
         }
     }
 
+    #[tool(description = "Market insight research: stocks, crypto, and macro. \
+        query: ticker (BTC, NVDA) or topic (AI chip stocks). \
+        asset_class: stock | crypto | macro (default: macro). \
+        mode: quick | summary | report (default) | deep.")]
+    async fn market_insight(
+        &self,
+        Parameters(input): Parameters<MarketInsightInput>,
+    ) -> String {
+        use crate::researcher::pipeline::{
+            run, AssetClass, ResearchMode, ResearchRequest, ResearchTarget,
+        };
+
+        let asset_class: AssetClass = input
+            .asset_class
+            .as_deref()
+            .unwrap_or("macro")
+            .parse()
+            .unwrap_or_default();
+
+        let mode: ResearchMode = input
+            .mode
+            .as_deref()
+            .unwrap_or("report")
+            .parse()
+            .unwrap_or_default();
+
+        let target = ResearchTarget::Market { asset_class };
+        let domains = crate::researcher::pipeline::domains_for_target(&target);
+
+        let request = ResearchRequest {
+            topic: input.query,
+            mode,
+            domains,
+            domain_profile: None,
+            target,
+        };
+
+        match run(
+            &self.cfg,
+            &request,
+            |ev| eprintln!("[researcher] {ev}"),
+            None,
+        ).await {
+            Ok(r)  => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
+            Err(e) => format!("Error: {e:#}"),
+        }
+    }
+
 }
 
 #[tool_handler]
@@ -350,7 +410,7 @@ impl ServerHandler for ResearcherServer {
                 .build(),
         )
         .with_instructions(
-            "AI research agent — 5 tools:\n\
+            "AI research agent — 6 tools:\n\
              \n\
              • research(query, mode?, domain_profile?, domains?, max_queries?, max_sources?)\n\
                General web research. Modes: quick=snippets, summary=bullets, report=full markdown (default), deep=thorough.\n\
@@ -372,6 +432,12 @@ impl ServerHandler for ResearcherServer {
                Research a library/framework: bugs, breaking changes, releases, community sentiment.\n\
                aspects: bugs | changelog | community | releases (default: bugs+changelog+community).\n\
                query: keyword to narrow, e.g. \"middleware timeout\". repo: GitHub slug e.g. \"tokio-rs/axum\".\n\
+             \n\
+             • market_insight(query, asset_class?, mode?)\n\
+               Stock, crypto, and macro market research. Web research only — no price APIs.\n\
+               query: ticker (BTC, NVDA, $AAPL) or topic (AI chip stocks, Ethereum staking).\n\
+               asset_class: stock | crypto | macro (default: macro).\n\
+               mode: quick | summary | report (default) | deep.\n\
              ".to_string(),
         )
     }
@@ -454,6 +520,7 @@ fn config_from_env() -> Config {
         rerank_relevance_weight: env_f32("RERANK_RELEVANCE_WEIGHT", 0.7),
         rerank_authority_weight: env_f32("RERANK_AUTHORITY_WEIGHT", 0.2),
         rerank_quality_weight: env_f32("RERANK_QUALITY_WEIGHT", 0.1),
+        rerank_min_score: env_f32("RERANK_MIN_SCORE", -5.0),
         min_content_words: env_usize("MIN_CONTENT_WORDS", 100),
         min_text_density: env_f32("MIN_TEXT_DENSITY", 0.05),
         max_search_queries: env_usize("MAX_SEARCH_QUERIES", 4),

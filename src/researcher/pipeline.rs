@@ -23,6 +23,18 @@ pub enum ResearchMode {
     Deep,
 }
 
+impl std::str::FromStr for ResearchMode {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, ()> {
+        match s {
+            "quick"   => Ok(ResearchMode::Quick),
+            "summary" => Ok(ResearchMode::Summary),
+            "deep"    => Ok(ResearchMode::Deep),
+            _         => Ok(ResearchMode::Report),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum PersonMethod {
     Company,
@@ -41,6 +53,25 @@ impl std::str::FromStr for PersonMethod {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum AssetClass {
+    Stock,
+    Crypto,
+    #[default]
+    Macro,
+}
+
+impl std::str::FromStr for AssetClass {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, ()> {
+        match s {
+            "stock"  => Ok(AssetClass::Stock),
+            "crypto" => Ok(AssetClass::Crypto),
+            _        => Ok(AssetClass::Macro),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 #[allow(dead_code)]
 pub enum ResearchTarget {
@@ -48,6 +79,7 @@ pub enum ResearchTarget {
     Topic,
     Person { method: PersonMethod },
     Company,
+    Market { asset_class: AssetClass },
 }
 
 pub struct ResearchRequest {
@@ -74,32 +106,50 @@ impl ResearchRequest {
 }
 
 pub fn domains_for_target(target: &ResearchTarget) -> Vec<String> {
+    // Returns preferred (not mandatory) domains for query planning.
+    // These are passed as soft hints — the planner uses them for some queries
+    // but also generates open-web queries for better scrape coverage.
     match target {
         ResearchTarget::Topic => vec![],
         ResearchTarget::Person { method } => {
             let professional: &[&str] = &[
-                "linkedin.com", "twitter.com", "x.com", "github.com",
-                "medium.com", "scholar.google.com",
+                "github.com", "wikipedia.org", "medium.com",
+                "news.ycombinator.com", "youtube.com",
             ];
             let personal: &[&str] = &[
-                "facebook.com", "instagram.com", "twitter.com", "x.com",
-                "reddit.com", "tiktok.com",
+                "reddit.com", "youtube.com", "wikipedia.org",
             ];
             let domains: Vec<&str> = match method {
                 PersonMethod::Company  => professional.to_vec(),
                 PersonMethod::Personal => personal.to_vec(),
                 PersonMethod::Both => {
                     let mut v = professional.to_vec();
-                    v.extend_from_slice(personal);
+                    for d in personal {
+                        if !v.contains(d) { v.push(d); }
+                    }
                     v
                 }
             };
             domains.into_iter().map(String::from).collect()
         }
         ResearchTarget::Company => vec![
-            "linkedin.com", "crunchbase.com", "bloomberg.com",
-            "glassdoor.com", "trustpilot.com", "wikipedia.org",
+            "wikipedia.org", "techcrunch.com", "crunchbase.com",
+            "trustpilot.com", "reddit.com",
         ].into_iter().map(String::from).collect(),
+        ResearchTarget::Market { asset_class } => match asset_class {
+            AssetClass::Stock => vec![
+                "reuters.com", "ft.com", "seekingalpha.com", "marketwatch.com",
+                "investopedia.com", "finance.yahoo.com", "fool.com", "cnbc.com",
+            ],
+            AssetClass::Crypto => vec![
+                "coindesk.com", "cointelegraph.com", "decrypt.co", "theblock.co",
+                "bitcoinmagazine.com", "cryptoslate.com", "reddit.com",
+            ],
+            AssetClass::Macro => vec![
+                "reuters.com", "ft.com", "bloomberg.com", "cnbc.com",
+                "wsj.com", "economist.com", "marketwatch.com",
+            ],
+        }.into_iter().map(String::from).collect(),
     }
 }
 
@@ -175,7 +225,7 @@ pub async fn run(
 
     if sources.is_empty() {
         anyhow::bail!(
-            "No sources scraped. Check SearXNG is reachable at {}",
+            "No sources found. SearXNG at {} returned no results or all pages failed to scrape.",
             cfg.searxng_url
         );
     }
@@ -233,6 +283,7 @@ pub async fn run(
                 cfg.rerank_relevance_weight,
                 cfg.rerank_authority_weight,
                 cfg.rerank_quality_weight,
+                cfg.rerank_min_score,
             ).await {
                 Ok(ranked) => {
                     on_progress(ProgressEvent::CrawlComplete { sources: ranked.len() });

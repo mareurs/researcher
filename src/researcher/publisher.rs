@@ -109,16 +109,60 @@ pub async fn write_report(
                 ),
             }
         }
+        ResearchTarget::Market { asset_class } => {
+            use crate::researcher::pipeline::AssetClass;
+            let asset_label = match asset_class {
+                AssetClass::Stock  => "stock / equity",
+                AssetClass::Crypto => "cryptocurrency / blockchain asset",
+                AssetClass::Macro  => "macroeconomic topic",
+            };
+            match mode {
+                ResearchMode::Quick => format!(
+                    "Write a 3-bullet executive summary on {topic} ({asset_label}):\n\
+                     - What is happening right now\n\
+                     - The biggest catalyst or risk\n\
+                     - Outlook or key number to watch\n\
+                     One sentence per bullet. No headers.\n\n\
+                     {sources_text}"
+                ),
+                ResearchMode::Summary => format!(
+                    "Write a concise bullet-point market brief on {topic} ({asset_label}):\n\
+                     - 5-8 bullets covering catalysts, sentiment, and risks\n\
+                     - Each bullet: one concrete fact, number, or dated event\n\
+                     - No section headers, no introduction\n\n\
+                     {sources_text}"
+                ),
+                _ => format!(
+                    "You are a financial research analyst preparing a market insight brief on: \
+                     {topic} ({asset_label}).\n\
+                     Using the research below, write a concise markdown report with these exact sections:\n\n\
+                     ## Summary\n2-3 sentences on what is happening and why it matters.\n\
+                     ## Key Catalysts\nWhat is driving price action or the current narrative — \
+                     earnings, upgrades, protocol news, macro events. Be specific.\n\
+                     ## Sentiment\nAnalyst and community tone. Rating changes, price targets, \
+                     social sentiment signals.\n\
+                     ## Risks\nKey headwinds, regulatory exposure, macro sensitivity, \
+                     competitive threats.\n\n\
+                     Include numbers, dates, and named events. Cite sources inline with [N] notation.\n\n\
+                     {sources_text}"
+                ),
+            }
+        }
     };
 
+    let source_count = summaries.len();
     let messages = vec![
-        ChatMessage::system(
+        ChatMessage::system(format!(
             "You are an expert research analyst. Write comprehensive, well-structured \
              research reports based on gathered sources. Use markdown formatting. \
-             Always cite sources inline using [N] notation matching the source numbers. \
+             Always cite sources inline using [N] notation matching the source numbers provided. \
              Be objective, thorough, and analytical. Synthesize information across \
-             sources rather than just listing them.",
-        ),
+             sources rather than just listing them.\n\
+             CRITICAL: You have been given exactly {source_count} sources numbered 1 to {source_count}. \
+             ONLY cite [1] through [{source_count}] — NEVER invent, fabricate, or hallucinate \
+             URLs, source numbers, or citations that are not in the provided research. \
+             If information is not in the sources, say so rather than inventing it."
+        )),
         ChatMessage::user(prompt),
     ];
 
