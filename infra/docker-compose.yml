@@ -1,0 +1,118 @@
+# infra/docker-compose.yml
+#
+# Shared AI infrastructure stack — always-on, reusable across projects.
+#
+# GPU assignment:
+#   NVIDIA RTX A5000  → llama-cpp only (device_ids: ["0"])
+#   CPU               → tei-embed, tei-rerank, searxng
+#
+# TEI runs on CPU by design: neither TEI nor infinity have reliable Docker
+# images for consumer RDNA3 GPUs. bge-large (~300MB) and the cross-encoder
+# (~90MB) are fast enough on CPU (20-50ms/batch) for the research pipeline.
+#
+# Bring up:   docker compose up -d
+# Tear down:  docker compose down
+# (Use root Makefile: make infra-up / make infra-down)
+
+networks:
+  ai-infra-net:
+    driver: bridge
+
+volumes:
+  llama-models:
+  searxng-data:
+  tei-embed-cache:
+  tei-rerank-cache:
+
+services:
+  # ── SearXNG: private metasearch ────────────────────────────────────────────
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    networks:
+      - ai-infra-net
+    ports:
+      - "4000:8080"
+    volumes:
+      - searxng-data:/etc/searxng
+      - ../config/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:4000/
+    restart: unless-stopped
+
+  # ── llama.cpp: OpenAI-compatible LLM, NVIDIA A5000 only ───────────────────
+  # device_ids: ["0"] pins exclusively to the A5000 (GPU index 0).
+  # Reusable: any project on ai-infra-net can point LLM_BASE_URL here.
+  llama-cpp:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: llama-cpp
+    networks:
+      - ai-infra-net
+    ports:
+      - "30080:8080"
+    volumes:
+      - /home/marius/.lmstudio/models:/models:ro
+    environment:
+      - LLAMA_ARG_MODEL=/models/${LLAMA_MODEL:-bartowski/Qwen_Qwen3.5-27B-GGUF/Qwen_Qwen3.5-27B-Q4_K_M.gguf}
+      - LLAMA_ARG_HOST=0.0.0.0
+      - LLAMA_ARG_PORT=8080
+      - LLAMA_ARG_CTX_SIZE=${LLAMA_CTX_SIZE:-16384}
+      - LLAMA_ARG_N_GPU_LAYERS=${LLAMA_GPU_LAYERS:-99}
+      - LLAMA_ARG_PARALLEL=${LLAMA_PARALLEL:-2}
+      - LLAMA_ARG_CONT_BATCHING=1
+      - LLAMA_ARG_FLASH_ATTN=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]       # A5000 is GPU index 0
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # ── TEI embed: CPU inference ───────────────────────────────────────────────
+  # Uses the standard CUDA image but without GPU passthrough — runs on CPU.
+  # bge-large-en-v1.5 is ~300MB; CPU latency is 20-50ms/batch, fine for this.
+  tei-embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
+    container_name: tei-embed
+    networks:
+      - ai-infra-net
+    ports:
+      - "8081:80"
+    command: --model-id BAAI/bge-large-en-v1.5 --port 80 --auto-truncate --max-concurrent-requests 32
+    volumes:
+      - tei-embed-cache:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # ── TEI rerank: CPU inference ──────────────────────────────────────────────
+  # Cross-encoder is ~90MB — trivial on CPU.
+  tei-rerank:
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
+    container_name: tei-rerank
+    networks:
+      - ai-infra-net
+    ports:
+      - "8082:80"
+    command: --model-id cross-encoder/ms-marco-MiniLM-L-6-v2 --port 80 --auto-truncate --max-concurrent-requests 32
+    volumes:
+      - tei-rerank-cache:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
