@@ -37,6 +37,10 @@ fn target_authority_domains(target: &ResearchTarget) -> &'static [&'static str] 
             "linkedin.com", "crunchbase.com", "glassdoor.com",
             "trustpilot.com", "bloomberg.com",
         ],
+        ResearchTarget::Market { .. } => &[
+            "reuters.com", "ft.com", "bloomberg.com", "wsj.com",
+            "coindesk.com", "cointelegraph.com",
+        ],
         ResearchTarget::Topic => &[],
     }
 }
