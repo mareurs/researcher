@@ -11,7 +11,8 @@ Split the single `docker-compose.yml` into two independent stacks:
 
 GPU load is split by workload:
 - **NVIDIA RTX A5000 (24GB)** — llama-cpp only; freed from TEI to run a larger model
-- **AMD RX 7800 XT (Navi 32)** — TEI embed + rerank via ROCm; SearXNG on CPU
+- **AMD RX 7800 XT (Navi 32)** — display only; no ML workload (neither TEI nor infinity have reliable consumer RDNA3 Docker support)
+- **CPU** — TEI embed + rerank + SearXNG
 
 ## Directory Structure
 
@@ -39,8 +40,8 @@ researcher/
 | Service | Image | GPU | Port |
 |---------|-------|-----|------|
 | `llama-cpp` | `ghcr.io/ggml-org/llama.cpp:server-cuda` | NVIDIA A5000 (`device_ids: ["0"]`) | 30080 |
-| `tei-embed` | `ghcr.io/huggingface/text-embeddings-inference:rocm-1.6` | AMD renderD128 (ROCm) | 8081 |
-| `tei-rerank` | `ghcr.io/huggingface/text-embeddings-inference:rocm-1.6` | AMD renderD128 (ROCm) | 8082 |
+| `tei-embed` | `ghcr.io/huggingface/text-embeddings-inference:86-1.8` | CPU (no passthrough) | 8081 |
+| `tei-rerank` | `ghcr.io/huggingface/text-embeddings-inference:86-1.8` | CPU (no passthrough) | 8082 |
 | `searxng` | `searxng/searxng:latest` | CPU | 4000 |
 
 All volumes (`llama-models`, `tei-embed-cache`, `tei-rerank-cache`, `searxng-data`) are owned by the infra stack.
@@ -65,21 +66,9 @@ deploy:
           capabilities: [gpu]
 ```
 
-### AMD RX 7800 XT — TEI services
+### TEI services — CPU only
 
-```yaml
-image: ghcr.io/huggingface/text-embeddings-inference:rocm-1.6
-devices:
-  - /dev/kfd:/dev/kfd
-  - /dev/dri/renderD128:/dev/dri/renderD128
-group_add:
-  - video
-  - render
-environment:
-  - HSA_OVERRIDE_GFX_VERSION=11.0.0   # Navi 32 (gfx1101) compatibility shim
-```
-
-`HSA_OVERRIDE_GFX_VERSION=11.0.0` is required for Navi 32 — ROCm 6.x may misidentify the GPU without it. The TEI ROCm image bundles ROCm internally; no host ROCm install required.
+Neither TEI nor infinity (the main alternative) have reliable Docker images for consumer RDNA3 GPUs. TEI publishes no ROCm images at all; infinity's ROCm image targets MI200/MI300 data center cards. The models are small enough (bge-large ~300MB, cross-encoder ~90MB) that CPU latency is acceptable (20-50ms per batch) for the research pipeline. No device passthrough needed.
 
 ## Model Upgrade
 
@@ -107,5 +96,5 @@ Root `Makefile` with targets: `infra-up`, `infra-down`, `infra-logs`, `infra-pul
 
 - `depends_on` removed from researcher compose — infra is external, Docker cannot health-check across projects
 - `COMPOSE_PROJECT_NAME=ai-infra` in `infra/.env` prevents name collisions with root compose project
-- ROCm TEI image tag (`rocm-1.6`) should be verified against HuggingFace registry at implementation time
-- `/dev/kfd` must be accessible to the Docker daemon user (typically requires `render` group on host)
+- TEI runs on CPU only — no AMD GPU passthrough (no reliable consumer RDNA3 Docker support in TEI or infinity)
+- AMD RX 7800 XT handles display only
