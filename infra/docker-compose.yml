@@ -19,7 +19,6 @@ networks:
     driver: bridge
 
 volumes:
-  llama-models:
   searxng-data:
   tei-embed-cache:
   tei-rerank-cache:
@@ -51,7 +50,7 @@ services:
     ports:
       - "30080:8080"
     volumes:
-      - /home/marius/.lmstudio/models:/models:ro
+      - ${LLAMA_MODELS_PATH:-/home/marius/.lmstudio/models}:/models:ro
     environment:
       - LLAMA_ARG_MODEL=/models/${LLAMA_MODEL:-bartowski/Qwen_Qwen3.5-27B-GGUF/Qwen_Qwen3.5-27B-Q4_K_M.gguf}
       - LLAMA_ARG_HOST=0.0.0.0
