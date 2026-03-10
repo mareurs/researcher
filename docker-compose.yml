@@ -1,170 +1,47 @@
-version: "3.9"
-
-# Reusable local LLM stack.
-# The llama-cpp-server is intentionally a standalone service so other
-# projects can point at it too (just use http://llama-cpp:8080/v1).
+# docker-compose.yml
 #
-# Profiles:
-#   (default)      — searxng + researcher only (use OPENAI_API_KEY)
-#   local-llm      — adds llama-cpp-server with GPU passthrough
+# Researcher app stack — the Rust binary only.
+# All infrastructure (LLM, TEI, SearXNG) lives in infra/docker-compose.yml.
+#
+# Prerequisites: infra stack must be running first.
+#   make infra-up
 #
 # Quick start:
-#   Local GPU:  docker compose --profile local-llm up
-#   OpenAI:     OPENAI_API_KEY=sk-... docker compose up
+#   docker compose up -d
 
 networks:
-  researcher-net:
-    driver: bridge
-
-volumes:
-  llama-models:
-  searxng-data:
-  tei-embed-cache:
-  tei-rerank-cache:
+  ai-infra-net:
+    external: true    # owned by infra/docker-compose.yml
 
 services:
-  # ── SearXNG: private metasearch, no API key required ──────────────────────
-  searxng:
-    image: searxng/searxng:latest
-    container_name: searxng
-    networks:
-      - researcher-net
-    ports:
-      - "4000:8080"
-    volumes:
-      - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro
-    environment:
-      - SEARXNG_BASE_URL=http://localhost:4000/
-    restart: unless-stopped
-
-  # ── llama.cpp server: OpenAI-compatible, GPU-accelerated ──────────────────
-  # This is the recommended local LLM backend:
-  # - Minimal footprint (~200MB Alpine image vs vLLM's multi-GB PyTorch image)
-  # - OpenAI-compatible /v1/chat/completions and /v1/completions
-  # - Runs on CUDA, ROCm, Metal, or pure CPU
-  # - Reusable: any project can point LLM_BASE_URL at this container
-  llama-cpp:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
-    container_name: llama-cpp
-    profiles: ["local-llm"]
-    networks:
-      - researcher-net
-    ports:
-      - "30080:8080"
-    volumes:
-      - /home/marius/.lmstudio/models:/models:ro
-    environment:
-      - LLAMA_ARG_MODEL=/models/${LLAMA_MODEL:-lmstudio-community/DeepSeek-R1-Distill-Qwen-7B-GGUF/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf}
-      - LLAMA_ARG_HOST=0.0.0.0
-      - LLAMA_ARG_PORT=8080
-      - LLAMA_ARG_CTX_SIZE=${LLAMA_CTX_SIZE:-8192}
-      - LLAMA_ARG_N_GPU_LAYERS=${LLAMA_GPU_LAYERS:-99}   # 99 = all layers to GPU
-      - LLAMA_ARG_PARALLEL=${LLAMA_PARALLEL:-4}           # concurrent request slots
-      - LLAMA_ARG_CONT_BATCHING=1                         # continuous batching
-      - LLAMA_ARG_FLASH_ATTN=1                            # flash attention
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    restart: unless-stopped
-
-  # ── TEI: GPU-accelerated embedding service (for source deduplication) ────────
-  # Same image used by gpt-researcher. Reusable across projects.
-  tei-embed:
-    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
-    container_name: tei-embed
-    networks:
-      - researcher-net
-    ports:
-      - "8081:80"
-    command: --model-id BAAI/bge-large-en-v1.5 --port 80 --auto-truncate --max-concurrent-requests 32
-    volumes:
-      - tei-embed-cache:/data
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
-    restart: unless-stopped
-
-  # ── TEI: Cross-encoder reranker (for source relevance scoring) ─────────────
-  # Lightweight cross-encoder (~80MB VRAM). Runs alongside tei-embed.
-  tei-rerank:
-    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
-    container_name: tei-rerank
-    networks:
-      - researcher-net
-    ports:
-      - "8082:80"
-    command: --model-id cross-encoder/ms-marco-MiniLM-L-6-v2 --port 80 --auto-truncate --max-concurrent-requests 32
-    volumes:
-      - tei-rerank-cache:/data
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
-    restart: unless-stopped
-
-  # ── Researcher: Rust binary ────────────────────────────────────────────────
   researcher:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: researcher
     networks:
-      - researcher-net
+      - ai-infra-net
     ports:
-      - "3000:3000"
+      - "33100:3000"
     environment:
-      # LLM backend — swap between local and OpenAI with one env var
+      # LLM backend — llama-cpp in infra stack, or swap for OpenAI
       - LLM_BASE_URL=${LLM_BASE_URL:-http://llama-cpp:8080/v1}
-      - LLM_MODEL=${LLM_MODEL:-Qwen_Qwen3.5-9B-Q4_K_M}
+      - LLM_MODEL=${LLM_MODEL:-Qwen_Qwen3.5-27B-Q4_K_M}
       - LLM_API_KEY=${OPENAI_API_KEY:-no-key-needed}
       - STRIP_THINKING_TOKENS=${STRIP_THINKING_TOKENS:-true}
       # Search
       - SEARXNG_URL=http://searxng:8080
       - SEARCH_RESULTS_PER_QUERY=${SEARCH_RESULTS_PER_QUERY:-8}
-      # Embeddings (TEI) — for source deduplication
+      # Embeddings (TEI embed in infra stack)
       - EMBED_BASE_URL=http://tei-embed:80
       - EMBED_MODEL=${EMBED_MODEL:-BAAI/bge-large-en-v1.5}
       - DEDUP_THRESHOLD=${DEDUP_THRESHOLD:-0.92}
-      # Reranking (TEI cross-encoder)
+      # Reranking (TEI rerank in infra stack)
       - RERANK_BASE_URL=http://tei-rerank:80
       # Research config
       - MAX_SEARCH_QUERIES=${MAX_SEARCH_QUERIES:-4}
       - MAX_SOURCES_PER_QUERY=${MAX_SOURCES_PER_QUERY:-4}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-2048}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.3}
       - RUST_LOG=${RUST_LOG:-info}
-    depends_on:
-      searxng:
-        condition: service_started
-      tei-embed:
-        condition: service_healthy
-      tei-rerank:
-        condition: service_healthy
     restart: unless-stopped
