@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Split the monolithic `docker-compose.yml` into a shared `infra/` stack (llama-cpp on A5000, TEI on AMD ROCm, SearXNG on CPU) and a lean researcher app stack that joins infra via external Docker network.
+**Goal:** Split the monolithic `docker-compose.yml` into a shared `infra/` stack (llama-cpp on A5000, TEI on CPU, SearXNG on CPU) and a lean researcher app stack that joins infra via external Docker network.
 
-**Architecture:** Two independent Docker Compose projects sharing an external bridge network (`ai-infra-net`). The infra stack owns all GPU services and volumes; the researcher stack is a single container that joins the network. GPU work is split: NVIDIA A5000 runs llama-cpp only, AMD RX 7800 XT (Navi 32) runs TEI embed + rerank via ROCm.
+**Architecture:** Two independent Docker Compose projects sharing an external bridge network (`ai-infra-net`). The infra stack owns all services and volumes; the researcher stack is a single container that joins the network. NVIDIA A5000 runs llama-cpp only. TEI embed + rerank run on CPU (models are small enough: bge-large ~300MB, cross-encoder ~90MB).
 
-**Tech Stack:** Docker Compose v2, NVIDIA Container Toolkit (already installed), ROCm via `/dev/kfd` + `/dev/dri` device passthrough, TEI ROCm image, llama-cpp CUDA image.
+**Tech Stack:** Docker Compose v2, NVIDIA Container Toolkit (already installed), standard TEI CUDA image run without GPU passthrough, llama-cpp CUDA image pinned to A5000 via `device_ids: ["0"]`.
 
 **Spec:** `docs/superpowers/specs/2026-03-10-gpu-split-infra-design.md`
 
@@ -14,30 +14,7 @@
 
 ## Chunk 1: infra/ stack
 
-### Task 1: Verify ROCm TEI image tag
-
-**Files:**
-- No file changes — discovery only
-
-- [ ] **Step 1: Check available ROCm TEI tags**
-
-```bash
-curl -s "https://ghcr.io/v2/huggingface/text-embeddings-inference/tags/list" \
-  2>/dev/null | python3 -m json.tool 2>/dev/null | grep rocm | head -20
-```
-
-If that returns nothing (auth required), check manually:
-https://github.com/huggingface/text-embeddings-inference/releases
-
-Look for the latest `rocm-*` tag. As of early 2026 it should be `rocm-1.6` or later.
-
-- [ ] **Step 2: Note the tag**
-
-Record the exact tag — you'll use it in Task 2. If `rocm-1.6` exists, use it. If not, use the latest `rocm-*` tag available.
-
----
-
-### Task 2: Create infra/docker-compose.yml
+### Task 1: Create infra/docker-compose.yml
 
 **Files:**
 - Create: `infra/docker-compose.yml`
@@ -49,10 +26,13 @@ Record the exact tag — you'll use it in Task 2. If `rocm-1.6` exists, use it. 
 #
 # Shared AI infrastructure stack — always-on, reusable across projects.
 #
-# GPU split:
-#   NVIDIA RTX A5000  → llama-cpp (heavy LLM inference)
-#   AMD RX 7800 XT    → tei-embed + tei-rerank (ROCm; small models, frees A5000 VRAM)
-#   CPU               → searxng
+# GPU assignment:
+#   NVIDIA RTX A5000  → llama-cpp only (device_ids: ["0"])
+#   CPU               → tei-embed, tei-rerank, searxng
+#
+# TEI runs on CPU by design: neither TEI nor infinity have reliable Docker
+# images for consumer RDNA3 GPUs. bge-large (~300MB) and the cross-encoder
+# (~90MB) are fast enough on CPU (20-50ms/batch) for the research pipeline.
 #
 # Bring up:   docker compose up -d
 # Tear down:  docker compose down
@@ -85,8 +65,8 @@ services:
     restart: unless-stopped
 
   # ── llama.cpp: OpenAI-compatible LLM, NVIDIA A5000 only ───────────────────
-  # device_ids: ["0"] pins to the A5000 (GPU index 0).
-  # Reusable: any project on ai-infra-net can use http://llama-cpp:8080/v1
+  # device_ids: ["0"] pins exclusively to the A5000 (GPU index 0).
+  # Reusable: any project on ai-infra-net can point LLM_BASE_URL here.
   llama-cpp:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: llama-cpp
@@ -120,11 +100,11 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  # ── TEI embed: AMD RX 7800 XT via ROCm ────────────────────────────────────
-  # HSA_OVERRIDE_GFX_VERSION=11.0.0 is required for Navi 32 (gfx1101).
-  # Without it ROCm 6.x may misidentify the GPU and refuse to run.
+  # ── TEI embed: CPU inference ───────────────────────────────────────────────
+  # Uses the standard CUDA image but without GPU passthrough — runs on CPU.
+  # bge-large-en-v1.5 is ~300MB; CPU latency is 20-50ms/batch, fine for this.
   tei-embed:
-    image: ghcr.io/huggingface/text-embeddings-inference:rocm-1.6
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
     container_name: tei-embed
     networks:
       - ai-infra-net
@@ -133,26 +113,18 @@ services:
     command: --model-id BAAI/bge-large-en-v1.5 --port 80 --auto-truncate --max-concurrent-requests 32
     volumes:
       - tei-embed-cache:/data
-    devices:
-      - /dev/kfd:/dev/kfd
-      - /dev/dri/renderD128:/dev/dri/renderD128
-    group_add:
-      - video
-      - render
-    environment:
-      - HSA_OVERRIDE_GFX_VERSION=11.0.0
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 90s
+      start_period: 60s
     restart: unless-stopped
 
-  # ── TEI rerank: AMD RX 7800 XT via ROCm ───────────────────────────────────
-  # Same ROCm setup as tei-embed. Cross-encoder is ~90MB — trivial VRAM cost.
+  # ── TEI rerank: CPU inference ──────────────────────────────────────────────
+  # Cross-encoder is ~90MB — trivial on CPU.
   tei-rerank:
-    image: ghcr.io/huggingface/text-embeddings-inference:rocm-1.6
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
     container_name: tei-rerank
     networks:
       - ai-infra-net
@@ -161,24 +133,14 @@ services:
     command: --model-id cross-encoder/ms-marco-MiniLM-L-6-v2 --port 80 --auto-truncate --max-concurrent-requests 32
     volumes:
       - tei-rerank-cache:/data
-    devices:
-      - /dev/kfd:/dev/kfd
-      - /dev/dri/renderD128:/dev/dri/renderD128
-    group_add:
-      - video
-      - render
-    environment:
-      - HSA_OVERRIDE_GFX_VERSION=11.0.0
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 90s
+      start_period: 60s
     restart: unless-stopped
 ```
-
-Replace `rocm-1.6` with the tag you verified in Task 1 if it differs.
 
 - [ ] **Step 2: Validate YAML syntax**
 
@@ -186,18 +148,18 @@ Replace `rocm-1.6` with the tag you verified in Task 1 if it differs.
 docker compose -f infra/docker-compose.yml config --quiet
 ```
 
-Expected: no output, exit code 0. Any error means a YAML syntax problem — fix before continuing.
+Expected: no output, exit code 0.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add infra/docker-compose.yml
-git commit -m "feat: add infra/docker-compose.yml with GPU-split AI stack"
+git commit -m "feat: add infra/docker-compose.yml — A5000 for llama-cpp, CPU for TEI"
 ```
 
 ---
 
-### Task 3: Create infra/.env.example
+### Task 2: Create infra/.env.example
 
 **Files:**
 - Create: `infra/.env.example`
@@ -219,19 +181,14 @@ LLAMA_GPU_LAYERS=99     # 99 = all layers to GPU
 LLAMA_PARALLEL=2        # 2 slots; 30B model needs ~10GB KV cache per slot at ctx=16384
 ```
 
-- [ ] **Step 2: Copy to infra/.env and set actual model path**
+- [ ] **Step 2: Copy to infra/.env and verify model path**
 
 ```bash
 cp infra/.env.example infra/.env
-```
-
-Edit `infra/.env`: verify `LLAMA_MODEL` matches the actual path under `~/.lmstudio/models/`.
-
-```bash
 ls ~/.lmstudio/models/ | grep -i qwen3
 ```
 
-If Qwen3-30B isn't downloaded yet, update `LLAMA_MODEL` to your current best model and proceed — the model path can be changed later without touching any compose file.
+If Qwen3-30B isn't downloaded yet, update `LLAMA_MODEL` in `infra/.env` to your current best model. No compose file changes needed — only the env file.
 
 - [ ] **Step 3: Validate infra compose with env file**
 
@@ -252,7 +209,7 @@ git commit -m "feat: add infra/.env.example with llama-cpp tuning vars"
 
 ## Chunk 2: Root compose cleanup
 
-### Task 4: Update docker-compose.yml (researcher only)
+### Task 3: Update docker-compose.yml (researcher only)
 
 **Files:**
 - Modify: `docker-compose.yml`
@@ -268,8 +225,7 @@ The root compose becomes minimal: one service, one external network, no volumes.
 # All infrastructure (LLM, TEI, SearXNG) lives in infra/docker-compose.yml.
 #
 # Prerequisites: infra stack must be running first.
-#   cd infra && docker compose up -d
-#   (or: make infra-up from repo root)
+#   make infra-up
 #
 # Quick start:
 #   docker compose up -d
@@ -312,7 +268,7 @@ services:
     restart: unless-stopped
 ```
 
-Note: `depends_on` is intentionally absent — Docker cannot health-check across compose projects. Infra must be up before running `docker compose up`.
+Note: `depends_on` is intentionally absent — Docker cannot health-check across compose projects.
 
 - [ ] **Step 2: Validate**
 
@@ -331,12 +287,10 @@ git commit -m "refactor: slim docker-compose.yml to researcher-only; infra moved
 
 ---
 
-### Task 5: Update root .env.example
+### Task 4: Update root .env.example
 
 **Files:**
 - Modify: `.env.example`
-
-Remove infra vars (model path, GPU layers, ctx size) — those now live in `infra/.env.example`.
 
 - [ ] **Step 1: Replace .env.example**
 
@@ -390,7 +344,7 @@ git commit -m "chore: remove infra vars from root .env.example (moved to infra/.
 
 ## Chunk 3: Makefile + smoke test
 
-### Task 6: Add root Makefile
+### Task 5: Add root Makefile
 
 **Files:**
 - Create: `Makefile`
@@ -439,15 +393,13 @@ git commit -m "chore: add Makefile with infra-up/down/logs and up/down/logs targ
 
 ---
 
-### Task 7: Smoke test — infra stack
+### Task 6: Smoke test — infra stack
 
 - [ ] **Step 1: Pull infra images**
 
 ```bash
 make infra-pull
 ```
-
-This will error if the TEI ROCm tag doesn't exist — fix the tag in `infra/docker-compose.yml` if so.
 
 - [ ] **Step 2: Start infra stack**
 
@@ -461,7 +413,7 @@ make infra-up
 make infra-logs
 ```
 
-Wait for all four services to become healthy. TEI models download on first start (~1-2GB each) — expect 2-5 minutes. llama-cpp start_period is 60s.
+Wait for all services to become healthy. TEI models download on first start (~1-2GB each) — expect 2-5 minutes.
 
 - [ ] **Step 4: Verify network exists**
 
@@ -469,43 +421,30 @@ Wait for all four services to become healthy. TEI models download on first start
 docker network ls | grep ai-infra-net
 ```
 
-Expected: one line showing `ai-infra-net` with driver `bridge`.
+Expected: one line with driver `bridge`.
 
 - [ ] **Step 5: Verify service health**
 
 ```bash
-curl -s http://localhost:4000/     | grep -i searx     # SearXNG UI
-curl -s http://localhost:8081/health                   # TEI embed
-curl -s http://localhost:8082/health                   # TEI rerank
-curl -s http://localhost:30080/health                  # llama-cpp
+curl -s http://localhost:4000/     | grep -i searx   # SearXNG UI
+curl -s http://localhost:8081/health                 # TEI embed
+curl -s http://localhost:8082/health                 # TEI rerank
+curl -s http://localhost:30080/health                # llama-cpp
 ```
 
 All should return HTTP 200.
 
-- [ ] **Step 6: Verify GPU assignment**
+- [ ] **Step 6: Verify A5000 is running llama-cpp**
 
 ```bash
-# A5000 should show llama-cpp process
 nvidia-smi
-
-# AMD card should show TEI processes
-cat /sys/kernel/debug/dri/1/clients 2>/dev/null || \
-  docker exec tei-embed rocm-smi 2>/dev/null || \
-  echo "Check AMD GPU load via: watch -n1 radeontop"
 ```
 
-- [ ] **Step 7: Commit smoke test outcome (if any config fixes were needed)**
-
-If you had to fix the TEI image tag or any other config:
-
-```bash
-git add infra/docker-compose.yml
-git commit -m "fix: correct TEI ROCm image tag to <actual-tag>"
-```
+Expected: llama-cpp process visible using GPU 0 (A5000).
 
 ---
 
-### Task 8: Smoke test — researcher stack
+### Task 7: Smoke test — researcher stack
 
 - [ ] **Step 1: Start researcher**
 
@@ -529,7 +468,7 @@ curl -s -X POST http://localhost:33100/research \
   -d '{"query": "what is Rust", "mode": "quick"}' | head -c 500
 ```
 
-Expected: JSON with a short research result. If TEI or llama-cpp aren't reachable, researcher will log errors — check with `make logs`.
+Expected: JSON with a short research result.
 
 - [ ] **Step 4: Final commit**
 
@@ -542,16 +481,6 @@ git commit -m "chore: final infra split smoke test complete"
 
 ## Notes for Implementer
 
-**ROCm `/dev/kfd` permissions:** If TEI fails to open `/dev/kfd`, the Docker daemon user needs access. Check:
-```bash
-ls -la /dev/kfd
-# If group is 'render': add the docker user to the render group
-sudo usermod -aG render $USER  # then re-login
-```
+**Model not downloaded yet?** Update `LLAMA_MODEL` in `infra/.env` to an existing model path (e.g. the current DeepSeek-R1-Distill-Qwen-7B), start infra, verify everything works, then swap to Qwen3-30B once downloaded. No compose file changes needed — only the env file.
 
-**Model not downloaded yet?** Update `LLAMA_MODEL` in `infra/.env` to an existing model path, start infra, verify everything works, then swap to Qwen3-30B once downloaded. No compose file changes needed — only the env file.
-
-**HSA_OVERRIDE_GFX_VERSION:** If TEI still fails on AMD with `No GPU found`, try `HSA_OVERRIDE_GFX_VERSION=11.0.1` (exact Navi 32 sub-revision). Check with:
-```bash
-docker exec tei-embed rocminfo 2>/dev/null | grep gfx
-```
+**TEI on CPU is intentional.** Neither TEI nor infinity publish reliable Docker images for consumer RDNA3 (RX 7800 XT). The models are small enough that CPU is fine. Do not attempt ROCm passthrough.
