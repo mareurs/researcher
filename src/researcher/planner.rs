@@ -185,7 +185,7 @@ pub async fn generate_queries(
     };
 
     let messages = vec![
-        ChatMessage::system(system_prompt),
+        ChatMessage::system(format!("/no_think\n{system_prompt}")),
         ChatMessage::user(format!(
             "Research topic: {display_topic}\n\n\
              Generate exactly {max_queries} distinct search queries to research this topic \
