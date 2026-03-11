@@ -528,13 +528,13 @@ fn config_from_env() -> Config {
         llm_base_url: env("LLM_BASE_URL", "http://localhost:8080/v1"),
         llm_model: env("LLM_MODEL", "Qwen_Qwen3.5-9B-Q4_K_M"),
         llm_api_key: env("LLM_API_KEY", "no-key-needed"),
-        llm_max_tokens: env_usize("LLM_MAX_TOKENS", 2048) as u32,
+        llm_max_tokens: env_usize("LLM_MAX_TOKENS", 4096) as u32,
         llm_temperature: env_f32("LLM_TEMPERATURE", 0.3),
         strip_thinking_tokens: env_bool("STRIP_THINKING_TOKENS", true),
         llm_fast_base_url: env("LLM_FAST_BASE_URL", ""),
         llm_fast_model: env("LLM_FAST_MODEL", "Qwen3.5-4B-Q4_K_M"),
         llm_fast_api_key: env("LLM_FAST_API_KEY", ""),
-        llm_fast_max_tokens: env_usize("LLM_FAST_MAX_TOKENS", 2048) as u32,
+        llm_fast_max_tokens: env_usize("LLM_FAST_MAX_TOKENS", 4096) as u32,
         llm_fast_stages: env("LLM_FAST_STAGES", "planner,summarizer")
             .split(',')
             .map(|s| s.trim().to_lowercase())

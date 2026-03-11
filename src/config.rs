@@ -56,7 +56,7 @@ pub struct Config {
     pub llm_api_key: String,
 
     /// Max tokens for summary/report responses
-    #[arg(long, env = "LLM_MAX_TOKENS", default_value = "2048")]
+    #[arg(long, env = "LLM_MAX_TOKENS", default_value = "4096")]
     pub llm_max_tokens: u32,
 
     /// Temperature for LLM responses
@@ -82,8 +82,8 @@ pub struct Config {
     #[arg(long, env = "LLM_FAST_API_KEY", default_value = "")]
     pub llm_fast_api_key: String,
 
-    /// Max tokens for fast LLM responses (structured JSON, typically small)
-    #[arg(long, env = "LLM_FAST_MAX_TOKENS", default_value = "2048")]
+    /// Max tokens for fast LLM responses
+    #[arg(long, env = "LLM_FAST_MAX_TOKENS", default_value = "4096")]
     pub llm_fast_max_tokens: u32,
 
     /// Pipeline stages that use the fast LLM backend (comma-separated).
