@@ -178,6 +178,10 @@ query → planner (LLM) → [search+scrape]×N → quality filter → embed-dedu
 | `LLM_MAX_TOKENS` | `2048` | Max tokens per LLM call |
 | `LLM_TEMPERATURE` | `0.3` | Generation temperature |
 | `STRIP_THINKING_TOKENS` | `true` | Strip `<think>` from Qwen3 |
+| `LLM_FAST_BASE_URL` | `` (disabled) | Fast LLM endpoint; empty = use heavy backend |
+| `LLM_FAST_MODEL` | `Qwen3.5-4B-Q4_K_M` | Model name for fast LLM |
+| `LLM_FAST_API_KEY` | `` | Fast LLM API key; empty = use `LLM_API_KEY` |
+| `LLM_FAST_MAX_TOKENS` | `2048` | Max tokens for fast LLM responses |
 | `SEARXNG_URL` | `http://localhost:4000` | SearXNG instance |
 | `SEARCH_RESULTS_PER_QUERY` | `8` | Results fetched per sub-question |
 | `EMBED_BASE_URL` | `` (disabled) | TEI URL; empty = skip dedup |
