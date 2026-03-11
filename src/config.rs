@@ -88,7 +88,7 @@ pub struct Config {
 
     /// Pipeline stages that use the fast LLM backend (comma-separated).
     /// Valid: planner, summarizer, publisher. Default: planner,summarizer.
-    #[arg(long, env = "LLM_FAST_STAGES", value_delimiter = ',', default_values_t = vec!["planner".to_string(), "summarizer".to_string()])]
+    #[arg(long, env = "LLM_FAST_STAGES", value_delimiter = ',', default_values_t = vec!["planner".to_string(), "summarizer".to_string(), "publisher".to_string()])]
     pub llm_fast_stages: Vec<String>,
 
     // ── Search ───────────────────────────────────────────────────────────────
