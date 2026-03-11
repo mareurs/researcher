@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::config::Config;
 
@@ -59,6 +59,12 @@ pub struct LlmClient {
 
 impl LlmClient {
 pub fn new(cfg: &Config) -> Self {
+        info!(
+            backend = "heavy",
+            url = %cfg.llm_base_url,
+            model = %cfg.llm_model,
+            "LlmClient::new"
+        );
         Self {
             http: Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
@@ -68,6 +74,50 @@ pub fn new(cfg: &Config) -> Self {
             api_key: cfg.llm_api_key.clone(),
             model: cfg.llm_model.clone(),
             max_tokens: cfg.llm_max_tokens,
+            temperature: cfg.llm_temperature,
+            strip_thinking: cfg.strip_thinking_tokens,
+        }
+    }
+
+    /// Build a client for the fast/lightweight LLM backend.
+    /// Falls back to the heavy backend if `LLM_FAST_BASE_URL` is empty.
+    pub fn new_fast(cfg: &Config) -> Self {
+        let use_fast = !cfg.llm_fast_base_url.is_empty();
+
+        let base_url = if use_fast {
+            &cfg.llm_fast_base_url
+        } else {
+            &cfg.llm_base_url
+        };
+
+        let api_key = if use_fast && !cfg.llm_fast_api_key.is_empty() {
+            &cfg.llm_fast_api_key
+        } else {
+            &cfg.llm_api_key
+        };
+
+        let (model, max_tokens) = if use_fast {
+            (&cfg.llm_fast_model, cfg.llm_fast_max_tokens)
+        } else {
+            (&cfg.llm_model, cfg.llm_max_tokens)
+        };
+
+        info!(
+            backend = if use_fast { "fast" } else { "heavy (fallback)" },
+            url = %base_url,
+            model = %model,
+            "LlmClient::new_fast"
+        );
+
+        Self {
+            http: Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .expect("HTTP client"),
+            base_url: base_url.trim_end_matches('/').to_string(),
+            api_key: api_key.clone(),
+            model: model.clone(),
+            max_tokens,
             temperature: cfg.llm_temperature,
             strip_thinking: cfg.strip_thinking_tokens,
         }
