@@ -198,8 +198,9 @@ pub async fn run(
     let max_queries = if depth { cfg.max_search_queries * 2 } else { cfg.max_search_queries };
     let max_sources = if depth { cfg.max_sources_per_query * 2 } else { cfg.max_sources_per_query };
 
-    // 3. Build clients
+    // 3. Build clients (heavy for report, fast for structured tasks)
     let llm = LlmClient::new(cfg);
+    let llm_fast = LlmClient::new_fast(cfg);
     let http = Client::builder()
         .user_agent("Researcher/0.1")
         .timeout(std::time::Duration::from_secs(30))
@@ -207,7 +208,7 @@ pub async fn run(
 
     // 4. Plan
     on_progress(ProgressEvent::Planning);
-    let queries = generate_queries(&llm, topic, max_queries, &domains, &request.target).await?;
+    let queries = generate_queries(&llm_fast, topic, max_queries, &domains, &request.target).await?;
     on_progress(ProgressEvent::Queries(queries.clone()));
 
     // 5. Crawl (deep mode uses overridden max_sources_per_query)
@@ -306,7 +307,7 @@ pub async fn run(
 
     // 9. Summarize concurrently
     on_progress(ProgressEvent::Summarizing { total: sources.len() });
-    let summaries = summarize_all(&llm, &sources, topic).await;
+    let summaries = summarize_all(&llm_fast, &sources, topic).await;
     info!(summaries = summaries.len(), "summarization complete");
     on_progress(ProgressEvent::SummarizingComplete { summaries: summaries.len() });
 
