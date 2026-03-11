@@ -109,6 +109,58 @@ query → planner (LLM) → [search+scrape]×N → quality filter → embed-dedu
 
 **Every time a new tool is added to `researcher-mcp`, update `get_info()` in `src/mcp_server.rs`** to add a one-line bullet for the new tool in the `with_instructions(...)` block. The instructions must always enumerate all available tools with their signatures and key parameters so the LLM host can pick the right tool without guessing.
 
+## Rust Coding Standards
+
+### Ownership first
+- Restructure data and function signatures to satisfy the borrow checker.
+  Never reach for `.clone()` as a first resort — only clone when semantically
+  appropriate (the clone represents intentional duplication, not a workaround).
+- Design ownership topology before writing implementations. Ask: who owns this
+  data, and what borrows it?
+
+### Error handling
+- All fallible functions return `Result<T, E>`. Never use `.unwrap()` in
+  library code. In application code, only use `.unwrap()` where a panic is
+  genuinely the correct behavior and document why.
+- Use `anyhow` for application-level error propagation, `thiserror` for
+  library error types.
+- Propagate errors with `?`. Avoid nested match blocks for error handling.
+
+### Iterators over loops
+- Prefer iterator adapters (`.map()`, `.filter()`, `.fold()`, `.collect()`)
+  over explicit `for` loops when the intent is a transformation pipeline.
+- Use `.iter()` / `.iter_mut()` / `.into_iter()` correctly — do not
+  implicitly rely on auto-deref behavior.
+
+### Generics vs trait objects
+- Default to generics (`fn foo<T: Trait>(x: T)`) for zero-cost dispatch.
+- Only use `Box<dyn Trait>` / `Arc<dyn Trait>` when you need runtime
+  polymorphism (heterogeneous collections, plugin systems, dynamic dispatch).
+  Always comment why dynamic dispatch is needed.
+
+### Concurrency
+- Before reaching for `Arc<Mutex<T>>`, ask whether ownership can be
+  structured to avoid shared state entirely.
+- Prefer message passing (channels) over shared state for complex coordination.
+- Use `tokio` for async I/O. Never block inside async functions.
+
+### Clippy
+- All code must pass `cargo clippy -- -D warnings`.
+- When clippy suggests an alternative, prefer it unless there's a documented
+  reason not to.
+
+### Lifetimes
+- Annotate lifetimes explicitly when the compiler cannot infer them and
+  explain the relationship in a comment.
+- Prefer owned types in struct fields over references where the struct
+  needs to be self-contained or sent across threads.
+
+### unsafe
+- Never write `unsafe` without a `// SAFETY:` comment explaining the
+  invariants being upheld.
+- Prefer safe abstractions. Reach for `unsafe` only when there is no
+  safe alternative and the performance gain is measured and documented.
+
 ## Codescout Rules (enforced by hooks)
 
 - **Never `Read` source files** — use `list_symbols` + `find_symbol(include_body=true)`
