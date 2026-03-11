@@ -29,6 +29,11 @@ services:
       - LLM_MODEL=${LLM_MODEL:-Qwen_Qwen3.5-27B-Q4_K_M}
       - LLM_API_KEY=${OPENAI_API_KEY:-no-key-needed}
       - STRIP_THINKING_TOKENS=${STRIP_THINKING_TOKENS:-true}
+      # Fast LLM backend — llama-cpp-fast in infra stack (structured tasks)
+      - LLM_FAST_BASE_URL=${LLM_FAST_BASE_URL:-http://llama-cpp-fast:8080/v1}
+      - LLM_FAST_MODEL=${LLM_FAST_MODEL:-Qwen3.5-4B-Q4_K_M}
+      - LLM_FAST_API_KEY=${LLM_FAST_API_KEY:-no-key-needed}
+      - LLM_FAST_MAX_TOKENS=${LLM_FAST_MAX_TOKENS:-2048}
       # Search
       - SEARXNG_URL=http://searxng:8080
       - SEARCH_RESULTS_PER_QUERY=${SEARCH_RESULTS_PER_QUERY:-8}
