@@ -76,10 +76,10 @@ services:
     restart: unless-stopped
 
   # ── TEI embed: CPU inference ───────────────────────────────────────────────
-  # Uses the standard CUDA image but without GPU passthrough — runs on CPU.
+  # cpu-1.8 is the CPU-only build (86-1.8 links against libcuda and won't start without GPU).
   # bge-large-en-v1.5 is ~300MB; CPU latency is 20-50ms/batch, fine for this.
   tei-embed:
-    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8
     container_name: tei-embed
     networks:
       - ai-infra-net
@@ -99,7 +99,7 @@ services:
   # ── TEI rerank: CPU inference ──────────────────────────────────────────────
   # Cross-encoder is ~90MB — trivial on CPU.
   tei-rerank:
-    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8
     container_name: tei-rerank
     networks:
       - ai-infra-net
