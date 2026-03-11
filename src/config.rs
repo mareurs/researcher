@@ -102,6 +102,11 @@ pub struct Config {
     #[arg(long, env = "RERANK_QUALITY_WEIGHT", default_value = "0.1")]
     pub rerank_quality_weight: f32,
 
+    /// Minimum raw cross-encoder relevance score to keep a source (logit scale).
+    /// Sources below this are dropped after reranking. -5.0 drops clearly off-topic results.
+    #[arg(long, env = "RERANK_MIN_SCORE", default_value = "-5.0")]
+    pub rerank_min_score: f32,
+
     // ── Quality filter ───────────────────────────────────────────────────────
     /// Minimum word count for a source to pass quality filter
     #[arg(long, env = "MIN_CONTENT_WORDS", default_value = "100")]

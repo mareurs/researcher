@@ -35,6 +35,16 @@ fn domain_from_url(url: &str) -> String {
 }
 
 
+/// Domains that consistently return off-topic results and should never be scraped.
+/// e.g. "Rust" the game showing up in Rust programming language searches.
+const DOMAIN_BLACKLIST: &[&str] = &[
+    "rust.facepunch.com",
+    "store.steampowered.com",
+    "city-data.com",
+    "facepunch.com",
+];
+
+
 /// For a single sub-question: search → deduplicate URLs → scrape in parallel.
 pub async fn crawl_query(
     http: &Client,
@@ -59,6 +69,11 @@ pub async fn crawl_query(
     let fresh: Vec<_> = results
         .into_iter()
         .filter(|r| {
+            let host = domain_from_url(&r.url);
+            if DOMAIN_BLACKLIST.iter().any(|b| host == *b || host.ends_with(&format!(".{b}"))) {
+                debug!(url = %r.url, "skipping blacklisted domain");
+                return false;
+            }
             let is_new = !visited_urls.contains(&r.url);
             if is_new {
                 visited_urls.insert(r.url.clone());
