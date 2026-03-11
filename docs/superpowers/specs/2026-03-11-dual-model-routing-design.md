@@ -50,8 +50,9 @@ New fields in `Config` (`src/config.rs`) and `config_from_env()` (`src/mcp_serve
 | `llm_fast_base_url` | `LLM_FAST_BASE_URL` | `""` (empty = use heavy backend) |
 | `llm_fast_model` | `LLM_FAST_MODEL` | `Qwen3-4B-Q4_K_M` |
 | `llm_fast_max_tokens` | `LLM_FAST_MAX_TOKENS` | `2048` |
+| `llm_fast_api_key` | `LLM_FAST_API_KEY` | `""` (empty = fall back to `LLM_API_KEY`) |
 
-`LLM_TEMPERATURE` and `STRIP_THINKING_TOKENS` are shared by both clients.
+`LLM_TEMPERATURE` and `STRIP_THINKING_TOKENS` are shared by both clients (intentional simplification — can be split later if tuning demands it).
 
 ### LlmClient
 
@@ -66,7 +67,7 @@ No structural changes to `LlmClient` itself — same `complete()` and `stream()`
 | Stage | Client | Reason |
 |-------|--------|--------|
 | `planner::generate_queries()` | fast | Structured JSON output, simple task |
-| `summarizer::summarize_all()` | fast | Structured JSON evaluation per source |
+| `summarizer::summarize_all()` (includes judge step) | fast | Structured JSON evaluation per source |
 | `publisher::write_report()` | heavy | Free-form long-form report generation |
 
 `crawler::crawl_all()` does not use LLM.
@@ -87,6 +88,7 @@ Add environment variables:
 - LLM_FAST_BASE_URL=${LLM_FAST_BASE_URL:-http://llama-cpp-fast:8080/v1}
 - LLM_FAST_MODEL=${LLM_FAST_MODEL:-Qwen3-4B-Q4_K_M}
 - LLM_FAST_MAX_TOKENS=${LLM_FAST_MAX_TOKENS:-2048}
+- LLM_FAST_API_KEY=${LLM_FAST_API_KEY:-no-key-needed}
 ```
 
 ### MCP config
@@ -115,3 +117,6 @@ No code changes needed — just swap `LLAMA_FAST_MODEL` in `infra/.env`.
 - `/no_think` prefix stays on planner/summarizer system prompts — Qwen3-4B supports the same `/no_think` mechanism.
 - `STRIP_THINKING_TOKENS` applies globally to both clients (same config field).
 - The fast model's `max_tokens=2048` is sufficient for structured JSON responses.
+- Fast model context (8192) is tight for summarizer: `MAX_PAGE_CHARS=8000` ≈ 2000-2700 tokens input + prompt + 2048 output ≈ ~6000 tokens. Fits, but if `MAX_PAGE_CHARS` increases, bump `LLAMA_FAST_CTX_SIZE` proportionally.
+- Startup: the fast backend must be healthy before the researcher starts, same as the heavy backend. No automatic fallback at runtime — if the fast backend is configured but down, the pipeline fails at the planner stage.
+- Log which backend each `LlmClient` targets at construction time (`info!` level) for debugging dual-routing.
