@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tracing::{debug, info};
 
 use crate::config::Config;
@@ -27,6 +28,8 @@ struct ChatRequest {
     max_tokens: u32,
     temperature: f32,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +58,7 @@ pub struct LlmClient {
     max_tokens: u32,
     temperature: f32,
     strip_thinking: bool,
+    disable_thinking: bool,
 }
 
 impl LlmClient {
@@ -76,6 +80,7 @@ pub fn new(cfg: &Config) -> Self {
             max_tokens: cfg.llm_max_tokens,
             temperature: cfg.llm_temperature,
             strip_thinking: cfg.strip_thinking_tokens,
+            disable_thinking: false,
         }
     }
 
@@ -106,6 +111,7 @@ pub fn new(cfg: &Config) -> Self {
             backend = if use_fast { "fast" } else { "heavy (fallback)" },
             url = %base_url,
             model = %model,
+            disable_thinking = use_fast,
             "LlmClient::new_fast"
         );
 
@@ -120,6 +126,7 @@ pub fn new(cfg: &Config) -> Self {
             max_tokens,
             temperature: cfg.llm_temperature,
             strip_thinking: cfg.strip_thinking_tokens,
+            disable_thinking: use_fast,
         }
     }
 
@@ -158,9 +165,14 @@ pub async fn complete(&self, messages: Vec<ChatMessage>) -> Result<String> {
             max_tokens: self.max_tokens,
             temperature: self.temperature,
             stream: false,
+            chat_template_kwargs: if self.disable_thinking {
+                Some(json!({"enable_thinking": false}))
+            } else {
+                None
+            },
         };
 
-        debug!(url, model = %self.model, "LLM request");
+        debug!(url, model = %self.model, disable_thinking = self.disable_thinking, "LLM request");
 
         let resp = self
             .http

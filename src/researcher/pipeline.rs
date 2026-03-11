@@ -1,6 +1,6 @@
 use anyhow::Result;
 use reqwest::Client;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::embeddings::client::EmbedClient;
@@ -90,6 +90,9 @@ pub struct ResearchRequest {
     /// Named profile from profiles.toml (e.g. "shopping-ro")
     pub domain_profile: Option<String>,
     pub target: ResearchTarget,
+    /// Override which pipeline stages use the fast LLM backend.
+    /// When None, uses config default (cfg.llm_fast_stages).
+    pub fast_stages: Option<Vec<String>>,
 }
 
 impl ResearchRequest {
@@ -101,6 +104,7 @@ impl ResearchRequest {
             domains: vec![],
             domain_profile: None,
             target: ResearchTarget::default(),
+            fast_stages: None,
         }
     }
 }
@@ -206,9 +210,31 @@ pub async fn run(
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
 
+    // 3b. Resolve stage routing (request override > config default)
+    let effective_fast: Vec<String> = request.fast_stages
+        .clone()
+        .unwrap_or_else(|| cfg.llm_fast_stages.clone());
+
+    for s in &effective_fast {
+        if !["planner", "summarizer", "publisher"].contains(&s.as_str()) {
+            warn!(stage = %s, "unknown stage in fast_stages, ignored");
+        }
+    }
+
+    let planner_llm = if effective_fast.iter().any(|s| s == "planner") { &llm_fast } else { &llm };
+    let summarizer_llm = if effective_fast.iter().any(|s| s == "summarizer") { &llm_fast } else { &llm };
+    let publisher_llm = if effective_fast.iter().any(|s| s == "publisher") { &llm_fast } else { &llm };
+
+    info!(
+        planner = if std::ptr::eq(planner_llm, &llm_fast) { "fast" } else { "heavy" },
+        summarizer = if std::ptr::eq(summarizer_llm, &llm_fast) { "fast" } else { "heavy" },
+        publisher = if std::ptr::eq(publisher_llm, &llm_fast) { "fast" } else { "heavy" },
+        "stage routing"
+    );
+
     // 4. Plan
     on_progress(ProgressEvent::Planning);
-    let queries = generate_queries(&llm_fast, topic, max_queries, &domains, &request.target).await?;
+    let queries = generate_queries(planner_llm, topic, max_queries, &domains, &request.target).await?;
     on_progress(ProgressEvent::Queries(queries.clone()));
 
     // 5. Crawl (deep mode uses overridden max_sources_per_query)
@@ -307,7 +333,7 @@ pub async fn run(
 
     // 9. Summarize concurrently
     on_progress(ProgressEvent::Summarizing { total: sources.len() });
-    let summaries = summarize_all(&llm_fast, &sources, topic).await;
+    let summaries = summarize_all(summarizer_llm, &sources, topic).await;
     info!(summaries = summaries.len(), "summarization complete");
     on_progress(ProgressEvent::SummarizingComplete { summaries: summaries.len() });
 
@@ -317,7 +343,7 @@ pub async fn run(
 
     // 10. Write report (streaming if token_tx provided)
     on_progress(ProgressEvent::WritingReport);
-    let raw_report = write_report(&llm, topic, &summaries, &request.mode, &request.target, token_tx).await?;
+    let raw_report = write_report(publisher_llm, topic, &summaries, &request.mode, &request.target, token_tx).await?;
     let report = format_report(&raw_report, &summaries);
     on_progress(ProgressEvent::Done);
 

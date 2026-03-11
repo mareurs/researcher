@@ -33,6 +33,7 @@ pub async fn write_job_report(
                     domains: vec![],
                     domain_profile: None,
                     target: ResearchTarget::Company,
+                    fast_stages: None,
                 };
                 match run(&cfg, &request, |_| {}, None).await {
                     Ok(r) => r.report.filter(|s| !s.is_empty()),
