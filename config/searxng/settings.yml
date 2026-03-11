@@ -10,7 +10,7 @@ general:
 search:
   safe_search: 0
   autocomplete: ""
-  default_lang: "en-US"   # Full locale needed for Bing to set mkt=en-us cookies
+  default_lang: "en"
   formats:
     - html
     - json   # Required — researcher uses the JSON API
@@ -33,9 +33,7 @@ engines:
   - name: bing
     engine: bing
     shortcut: bi
-    disabled: true   # Disabled: returns corrupt results when query contains extra terms
-    language: en
-    region: en-US
+    disabled: false
   - name: brave
     engine: brave
     shortcut: brave
