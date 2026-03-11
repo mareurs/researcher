@@ -67,6 +67,25 @@ pub struct Config {
     #[arg(long, env = "STRIP_THINKING_TOKENS", default_value = "true")]
     pub strip_thinking_tokens: bool,
 
+    // ── Fast LLM backend (structured tasks: planner, summarizer) ────────────
+
+    /// Base URL for the fast/lightweight LLM backend (structured tasks).
+    /// Empty string = fall back to LLM_BASE_URL.
+    #[arg(long, env = "LLM_FAST_BASE_URL", default_value = "")]
+    pub llm_fast_base_url: String,
+
+    /// Model name for the fast LLM backend
+    #[arg(long, env = "LLM_FAST_MODEL", default_value = "Qwen3.5-4B-Q4_K_M")]
+    pub llm_fast_model: String,
+
+    /// API key for the fast LLM backend. Empty = fall back to LLM_API_KEY.
+    #[arg(long, env = "LLM_FAST_API_KEY", default_value = "")]
+    pub llm_fast_api_key: String,
+
+    /// Max tokens for fast LLM responses (structured JSON, typically small)
+    #[arg(long, env = "LLM_FAST_MAX_TOKENS", default_value = "2048")]
+    pub llm_fast_max_tokens: u32,
+
     // ── Search ───────────────────────────────────────────────────────────────
     /// SearXNG base URL
     #[arg(long, env = "SEARXNG_URL", default_value = "http://localhost:4000")]
