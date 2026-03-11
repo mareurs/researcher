@@ -27,8 +27,7 @@ pub struct ResearchBody {
     pub domain_profile: Option<String>,
     #[serde(default)]
     pub domains: Option<Vec<String>>,
-    #[serde(default)]
-    pub fast_stages: Option<Vec<String>>,
+
 }
 
 fn into_pipeline_request(body: ResearchBody) -> crate::researcher::pipeline::ResearchRequest {
@@ -45,7 +44,7 @@ fn into_pipeline_request(body: ResearchBody) -> crate::researcher::pipeline::Res
         domains: body.domains.unwrap_or_default(),
         domain_profile: body.domain_profile,
         target: ResearchTarget::default(),
-        fast_stages: body.fast_stages.map(|v| v.iter().map(|s| s.trim().to_lowercase()).collect()),
+
     }
 }
 

@@ -34,7 +34,7 @@ services:
       - LLM_FAST_MODEL=${LLM_FAST_MODEL:-Qwen3.5-4B-Q4_K_M}
       - LLM_FAST_API_KEY=${LLM_FAST_API_KEY:-no-key-needed}
       - LLM_FAST_MAX_TOKENS=${LLM_FAST_MAX_TOKENS:-4096}
-      - LLM_FAST_STAGES=${LLM_FAST_STAGES:-planner,summarizer}
+      - LLM_FAST_STAGES=${LLM_FAST_STAGES:-planner,summarizer,publisher}
       # Search
       - SEARXNG_URL=http://searxng:8080
       - SEARCH_RESULTS_PER_QUERY=${SEARCH_RESULTS_PER_QUERY:-8}

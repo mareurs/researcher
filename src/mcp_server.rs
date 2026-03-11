@@ -60,8 +60,6 @@ pub struct ResearchInput {
     #[schemars(description = "Override max sources per query (uses config default if omitted)")]
     pub max_sources: Option<usize>,
 
-    #[schemars(description = "Override which pipeline stages use the fast LLM: planner, summarizer, publisher. Default from config.")]
-    pub fast_stages: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -72,8 +70,6 @@ pub struct PersonResearchInput {
     #[schemars(description = "Research focus: 'company' (professional background), 'personal' (interests/lifestyle), or 'both' (default)")]
     pub method: Option<String>,
 
-    #[schemars(description = "Override which pipeline stages use the fast LLM: planner, summarizer, publisher.")]
-    pub fast_stages: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -84,8 +80,6 @@ pub struct CompanyResearchInput {
     #[schemars(description = "Optional country to narrow results, e.g. 'Romania'")]
     pub country: Option<String>,
 
-    #[schemars(description = "Override which pipeline stages use the fast LLM: planner, summarizer, publisher.")]
-    pub fast_stages: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -110,8 +104,6 @@ pub struct CodeResearchInput {
     #[schemars(description = "Optional keyword to narrow results, e.g. \"middleware timeout\" or \"CORS\". Appended to every search query.")]
     pub query: Option<String>,
 
-    #[schemars(description = "Override which pipeline stages use the fast LLM: planner, summarizer, publisher.")]
-    pub fast_stages: Option<Vec<String>>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -125,8 +117,6 @@ pub struct MarketInsightInput {
     /// Output depth: "quick" | "summary" | "report" (default) | "deep"
     pub mode: Option<String>,
 
-    #[schemars(description = "Override which pipeline stages use the fast LLM: planner, summarizer, publisher.")]
-    pub fast_stages: Option<Vec<String>>,
 }
 
 // ── Server struct ─────────────────────────────────────────────────────────────
@@ -170,7 +160,7 @@ impl ResearcherServer {
             domains: input.domains.unwrap_or_default(),
             domain_profile: input.domain_profile,
             target: ResearchTarget::default(),
-            fast_stages: input.fast_stages.map(|v| v.iter().map(|s| s.trim().to_lowercase()).collect()),
+
         };
 
         match run(
@@ -206,7 +196,7 @@ impl ResearcherServer {
             domains: vec![],
             domain_profile: None,
             target: ResearchTarget::Person { method },
-            fast_stages: input.fast_stages.map(|v| v.iter().map(|s| s.trim().to_lowercase()).collect()),
+
         };
 
         match run(
@@ -240,7 +230,7 @@ impl ResearcherServer {
             domains: vec![],
             domain_profile: None,
             target: ResearchTarget::Company,
-            fast_stages: input.fast_stages.map(|v| v.iter().map(|s| s.trim().to_lowercase()).collect()),
+
         };
 
         match run(
@@ -404,7 +394,7 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
             domains,
             domain_profile: None,
             target,
-            fast_stages: input.fast_stages.map(|v| v.iter().map(|s| s.trim().to_lowercase()).collect()),
+
         };
 
         match run(
@@ -431,15 +421,15 @@ impl ServerHandler for ResearcherServer {
         .with_instructions(
             "AI research agent — 6 tools:\n\
              \n\
-             • research(query, mode?, domain_profile?, domains?, max_queries?, max_sources?, fast_stages?)\n\
+             • research(query, mode?, domain_profile?, domains?, max_queries?, max_sources?)\n\
                General web research. Modes: quick=snippets, summary=bullets, report=full markdown (default), deep=thorough.\n\
                Profiles: shopping-ro, tech-news, llm-news, academic, news, travel. Or pass domains:[\"example.com\"] to pin sites.\n\
              \n\
-             • research_person(name, method?, fast_stages?)\n\
+             • research_person(name, method?)\n\
                Meeting prep brief on any person. Covers career, public voice, interests, conversation hooks.\n\
                method: professional | personal | both (default). Sources: LinkedIn, X, GitHub, Facebook, Instagram, Reddit.\n\
              \n\
-             • research_company(name, country?, fast_stages?)\n\
+             • research_company(name, country?)\n\
                Meeting prep brief on a company. Covers what they do, size/stage, news, culture, strategy.\n\
                Sources: LinkedIn, Crunchbase, Bloomberg, Glassdoor, Trustpilot, Wikipedia.\n\
              \n\
@@ -447,12 +437,12 @@ impl ServerHandler for ResearcherServer {
                Find remote AI engineering jobs matching your profiles.toml [job-profile].\n\
                mode: list=shortlist (default), deep=full company briefs on top 5. Sources: Remotive, Adzuna, SearXNG.\n\
              \n\
-             • research_code(framework, version?, aspects?, repo?, query?, fast_stages?)\n\
+             • research_code(framework, version?, aspects?, repo?, query?)\n\
                Research a library/framework: bugs, breaking changes, releases, community sentiment.\n\
                aspects: bugs | changelog | community | releases (default: bugs+changelog+community).\n\
                query: keyword to narrow, e.g. \"middleware timeout\". repo: GitHub slug e.g. \"tokio-rs/axum\".\n\
              \n\
-             • market_insight(query, asset_class?, mode?, fast_stages?)\n\
+             • market_insight(query, asset_class?, mode?)\n\
                Stock, crypto, and macro market research. Web research only — no price APIs.\n\
                query: ticker (BTC, NVDA, $AAPL) or topic (AI chip stocks, Ethereum staking).\n\
                asset_class: stock | crypto | macro (default: macro).\n\
@@ -535,7 +525,7 @@ fn config_from_env() -> Config {
         llm_fast_model: env("LLM_FAST_MODEL", "Qwen3.5-4B-Q4_K_M"),
         llm_fast_api_key: env("LLM_FAST_API_KEY", ""),
         llm_fast_max_tokens: env_usize("LLM_FAST_MAX_TOKENS", 4096) as u32,
-        llm_fast_stages: env("LLM_FAST_STAGES", "planner,summarizer")
+        llm_fast_stages: env("LLM_FAST_STAGES", "planner,summarizer,publisher")
             .split(',')
             .map(|s| s.trim().to_lowercase())
             .filter(|s| !s.is_empty())

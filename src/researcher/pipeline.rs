@@ -90,9 +90,6 @@ pub struct ResearchRequest {
     /// Named profile from profiles.toml (e.g. "shopping-ro")
     pub domain_profile: Option<String>,
     pub target: ResearchTarget,
-    /// Override which pipeline stages use the fast LLM backend.
-    /// When None, uses config default (cfg.llm_fast_stages).
-    pub fast_stages: Option<Vec<String>>,
 }
 
 impl ResearchRequest {
@@ -104,7 +101,7 @@ impl ResearchRequest {
             domains: vec![],
             domain_profile: None,
             target: ResearchTarget::default(),
-            fast_stages: None,
+
         }
     }
 }
@@ -210,10 +207,8 @@ pub async fn run(
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
 
-    // 3b. Resolve stage routing (request override > config default)
-    let effective_fast: Vec<String> = request.fast_stages
-        .clone()
-        .unwrap_or_else(|| cfg.llm_fast_stages.clone());
+    // 3b. Resolve stage routing from config
+    let effective_fast: Vec<String> = cfg.llm_fast_stages.clone();
 
     for s in &effective_fast {
         if !["planner", "summarizer", "publisher"].contains(&s.as_str()) {
