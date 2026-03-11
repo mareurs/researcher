@@ -1,7 +1,10 @@
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM rust:1.82-slim AS builder
+FROM rust:1.88-slim AS builder
 
 WORKDIR /build
+
+# Install system dependencies required by openssl-sys
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
 # Cache dependencies separately from source
 COPY Cargo.toml Cargo.lock* ./
@@ -11,6 +14,7 @@ RUN rm src/main.rs
 
 # Build actual source
 COPY src ./src
+COPY static ./static
 RUN touch src/main.rs && cargo build --release
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
