@@ -41,7 +41,7 @@ pub async fn search(
         .query(&[
             ("q", query),
             ("format", "json"),
-            ("language", "en-US"),   // full locale → Bing sets mkt=en-us cookies
+            ("language", "en"),
             ("categories", "general"),
         ])
         .send()
