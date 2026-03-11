@@ -52,6 +52,7 @@ impl RerankerClient {
         relevance_weight: f32,
         authority_weight: f32,
         quality_weight: f32,
+        min_score: f32,
     ) -> Result<Vec<RankedSource>> {
         if sources.is_empty() {
             return Ok(vec![]);
@@ -89,12 +90,18 @@ impl RerankerClient {
         let mut ranked: Vec<RankedSource> = sources
             .into_iter()
             .enumerate()
-            .map(|(i, (source, quality))| {
+            .filter_map(|(i, (source, quality))| {
                 let relevance_score = results
                     .iter()
                     .find(|r| r.index == i)
                     .map(|r| r.score)
                     .unwrap_or(0.0);
+
+                // Drop sources whose raw relevance is below the minimum threshold
+                if relevance_score < min_score {
+                    debug!(url = %source.url, score = relevance_score, "reranker: dropping off-topic source");
+                    return None;
+                }
 
                 let q_score = crate::researcher::quality::quality_score(&quality);
 
@@ -102,12 +109,12 @@ impl RerankerClient {
                     + (quality.domain_authority * authority_weight)
                     + (q_score * quality_weight);
 
-                RankedSource {
+                Some(RankedSource {
                     source,
                     quality,
                     relevance_score,
                     combined_score,
-                }
+                })
             })
             .collect();
 

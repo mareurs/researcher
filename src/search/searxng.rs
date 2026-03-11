@@ -41,7 +41,7 @@ pub async fn search(
         .query(&[
             ("q", query),
             ("format", "json"),
-            ("language", "en"),
+            ("language", "en-US"),   // full locale → Bing sets mkt=en-us cookies
             ("categories", "general"),
         ])
         .send()
@@ -58,6 +58,7 @@ pub async fn search(
     let results = body
         .results
         .into_iter()
+        .filter(|r| !is_non_english_domain(&r.url))
         .take(num_results)
         .map(|r| SearchResult {
             title: r.title,
@@ -67,4 +68,33 @@ pub async fn search(
         .collect();
 
     Ok(results)
+}
+
+/// Filter out domains that predominantly host non-English content.
+fn is_non_english_domain(url: &str) -> bool {
+    // Extract hostname
+    let host = url
+        .split("://")
+        .nth(1)
+        .unwrap_or("")
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .trim_start_matches("www.");
+
+    const NON_ENGLISH: &[&str] = &[
+        "zhihu.com",
+        "baidu.com",
+        "csdn.net",
+        "cnblogs.com",
+        "163.com",
+        "sina.com.cn",
+        "weibo.com",
+        "bilibili.com",
+        "juejin.cn",
+        "segmentfault.com",
+        "tieba.baidu.com",
+    ];
+
+    NON_ENGLISH.iter().any(|d| host == *d || host.ends_with(&format!(".{d}")))
 }
