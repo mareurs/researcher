@@ -86,6 +86,11 @@ pub struct Config {
     #[arg(long, env = "LLM_FAST_MAX_TOKENS", default_value = "2048")]
     pub llm_fast_max_tokens: u32,
 
+    /// Pipeline stages that use the fast LLM backend (comma-separated).
+    /// Valid: planner, summarizer, publisher. Default: planner,summarizer.
+    #[arg(long, env = "LLM_FAST_STAGES", value_delimiter = ',', default_values_t = vec!["planner".to_string(), "summarizer".to_string()])]
+    pub llm_fast_stages: Vec<String>,
+
     // ── Search ───────────────────────────────────────────────────────────────
     /// SearXNG base URL
     #[arg(long, env = "SEARXNG_URL", default_value = "http://localhost:4000")]
