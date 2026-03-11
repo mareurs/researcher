@@ -3,7 +3,8 @@
 # Shared AI infrastructure stack — always-on, reusable across projects.
 #
 # GPU assignment:
-#   NVIDIA RTX A5000  → llama-cpp only (device_ids: ["0"])
+#   NVIDIA RTX A5000  → llama-cpp (heavy model, device_ids: ["0"])
+#   AMD RX 7800 XT    → llama-cpp-fast (fast model, /dev/kfd + /dev/dri via ROCm)
 #   CPU               → tei-embed, tei-rerank, searxng
 #
 # TEI runs on CPU by design: neither TEI nor infinity have reliable Docker
@@ -68,6 +69,41 @@ services:
             - driver: nvidia
               device_ids: ["0"]       # A5000 is GPU index 0
               capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # ── llama.cpp fast: lightweight LLM on AMD RX 7800 XT via ROCm ────────────
+  # Handles structured tasks (planner JSON, summarizer JSON) that don't need
+  # a large model. Frees A5000 capacity for heavy report generation.
+  llama-cpp-fast:
+    image: ghcr.io/ggml-org/llama.cpp:server-rocm
+    container_name: llama-cpp-fast
+    networks:
+      - ai-infra-net
+    ports:
+      - "30081:8080"
+    volumes:
+      - ${LLAMA_MODELS_PATH:-/home/marius/.lmstudio/models}:/models:ro
+    environment:
+      - LLAMA_ARG_MODEL=/models/${LLAMA_FAST_MODEL:-unsloth/Qwen3.5-4B-GGUF/Qwen3.5-4B-Q4_K_M.gguf}
+      - LLAMA_ARG_HOST=0.0.0.0
+      - LLAMA_ARG_PORT=8080
+      - LLAMA_ARG_CTX_SIZE=${LLAMA_FAST_CTX_SIZE:-8192}
+      - LLAMA_ARG_N_GPU_LAYERS=${LLAMA_FAST_GPU_LAYERS:-99}
+      - LLAMA_ARG_PARALLEL=${LLAMA_FAST_PARALLEL:-4}
+      - LLAMA_ARG_CONT_BATCHING=1
+      - LLAMA_ARG_FLASH_ATTN=1
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - render
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 15s
