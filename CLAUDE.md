@@ -175,13 +175,13 @@ query → planner (LLM) → [search+scrape]×N → quality filter → embed-dedu
 | `LLM_BASE_URL` | `http://localhost:8080/v1` | Any OpenAI-compat endpoint |
 | `LLM_MODEL` | `Qwen_Qwen3.5-9B-Q4_K_M` | Model name sent in requests |
 | `LLM_API_KEY` | `no-key-needed` | Set to `sk-...` for OpenAI |
-| `LLM_MAX_TOKENS` | `2048` | Max tokens per LLM call |
+| `LLM_MAX_TOKENS` | `4096` | Max tokens per LLM call |
 | `LLM_TEMPERATURE` | `0.3` | Generation temperature |
 | `STRIP_THINKING_TOKENS` | `true` | Strip `<think>` from Qwen3 |
 | `LLM_FAST_BASE_URL` | `` (disabled) | Fast LLM endpoint; empty = use heavy backend |
 | `LLM_FAST_MODEL` | `Qwen3.5-4B-Q4_K_M` | Model name for fast LLM |
 | `LLM_FAST_API_KEY` | `` | Fast LLM API key; empty = use `LLM_API_KEY` |
-| `LLM_FAST_MAX_TOKENS` | `2048` | Max tokens for fast LLM responses |
+| `LLM_FAST_MAX_TOKENS` | `4096` | Max tokens for fast LLM responses |
 | `LLM_FAST_STAGES` | `planner,summarizer` | Comma-separated pipeline stages using fast LLM (planner, summarizer, publisher) |
 | `SEARXNG_URL` | `http://localhost:4000` | SearXNG instance |
 | `SEARCH_RESULTS_PER_QUERY` | `8` | Results fetched per sub-question |

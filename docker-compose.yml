@@ -33,7 +33,7 @@ services:
       - LLM_FAST_BASE_URL=${LLM_FAST_BASE_URL:-http://llama-cpp-fast:8080/v1}
       - LLM_FAST_MODEL=${LLM_FAST_MODEL:-Qwen3.5-4B-Q4_K_M}
       - LLM_FAST_API_KEY=${LLM_FAST_API_KEY:-no-key-needed}
-      - LLM_FAST_MAX_TOKENS=${LLM_FAST_MAX_TOKENS:-2048}
+      - LLM_FAST_MAX_TOKENS=${LLM_FAST_MAX_TOKENS:-4096}
       - LLM_FAST_STAGES=${LLM_FAST_STAGES:-planner,summarizer}
       # Search
       - SEARXNG_URL=http://searxng:8080
@@ -47,7 +47,7 @@ services:
       # Research config
       - MAX_SEARCH_QUERIES=${MAX_SEARCH_QUERIES:-4}
       - MAX_SOURCES_PER_QUERY=${MAX_SOURCES_PER_QUERY:-4}
-      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-2048}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-4096}
       - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.3}
       - RUST_LOG=${RUST_LOG:-info}
     restart: unless-stopped
