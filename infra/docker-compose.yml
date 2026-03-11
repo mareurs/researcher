@@ -16,6 +16,7 @@
 
 networks:
   ai-infra-net:
+    name: ai-infra-net    # pin name so external consumers don't need to know the project prefix
     driver: bridge
 
 volumes:
