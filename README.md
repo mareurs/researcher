@@ -12,7 +12,7 @@ query → planner (LLM) → search+scrape×N → quality filter → dedup → re
 
 - **Multi-stage pipeline** — LLM-driven query planning, parallel web crawling, concurrent summarization, final report synthesis
 - **Any OpenAI-compatible LLM** — local (llama.cpp, Ollama, vLLM) or cloud (OpenAI, Anthropic via LiteLLM)
-- **Dual-model routing** — route cheap structured tasks (planner, summarizer) to a fast small model; reserve the large model for final report generation
+- **Dual-model routing** — optionally route different pipeline stages to different model backends
 - **Semantic deduplication** — TEI embeddings + cosine similarity drop near-duplicate sources before summarization
 - **Cross-encoder reranking** — `ms-marco-MiniLM` scores and reranks sources by relevance, authority, and content quality
 - **Domain profiles** — pin searches to curated source lists (tech-news, academic, llm-news, shopping, travel, news)
@@ -79,10 +79,10 @@ cp .env.example .env
 cp infra/.env.example infra/.env
 # Edit infra/.env: set LLAMA_MODELS_PATH to where your GGUF files live
 
-# 2. Download a model (example: Qwen3.5-9B, ~6GB)
-huggingface-cli download bartowski/Qwen_Qwen3.5-9B-GGUF \
-  --include "Qwen_Qwen3.5-9B-Q4_K_M.gguf" \
-  --local-dir /path/to/your/models/bartowski/Qwen_Qwen3.5-9B-GGUF/
+# 2. Download a model (Qwen3.5-4B — ~3GB VRAM, works great)
+huggingface-cli download unsloth/Qwen3.5-4B-GGUF \
+  --include "Qwen3.5-4B-Q4_K_M.gguf" \
+  --local-dir /path/to/your/models/unsloth/Qwen3.5-4B-GGUF/
 
 # 3. Start infrastructure (llama-cpp + SearXNG + TEI embed + TEI rerank)
 make infra-up
@@ -160,7 +160,7 @@ cargo build --release --bin researcher-mcp
       "command": "/path/to/researcher-mcp",
       "env": {
         "LLM_BASE_URL": "http://localhost:8080/v1",
-        "LLM_MODEL": "Qwen_Qwen3.5-9B-Q4_K_M",
+        "LLM_MODEL": "Qwen3.5-4B-Q4_K_M",
         "SEARXNG_URL": "http://localhost:4000",
         "STRIP_THINKING_TOKENS": "true",
         "EMBED_BASE_URL": "http://localhost:8081",
@@ -262,7 +262,7 @@ All settings are environment variables. Copy `.env.example` to `.env` and edit.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM_BASE_URL` | `http://localhost:8080/v1` | Any OpenAI-compatible endpoint |
-| `LLM_MODEL` | `Qwen_Qwen3.5-9B-Q4_K_M` | Model name sent in requests |
+| `LLM_MODEL` | `Qwen3.5-4B-Q4_K_M` | Model name sent in requests |
 | `LLM_API_KEY` | `no-key-needed` | Set to `sk-...` for OpenAI |
 | `LLM_MAX_TOKENS` | `4096` | Max tokens per LLM call |
 | `LLM_TEMPERATURE` | `0.3` | Generation temperature |
@@ -270,7 +270,7 @@ All settings are environment variables. Copy `.env.example` to `.env` and edit.
 
 ### Dual-model routing (optional)
 
-Route cheap structured tasks (planner, summarizer) to a fast small model, reserving the large model for final report generation. Leave `LLM_FAST_BASE_URL` empty to use a single backend for everything.
+Route different pipeline stages to a second model backend. Leave `LLM_FAST_BASE_URL` empty to use a single backend for everything (the default and recommended setup).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -458,12 +458,13 @@ docker build -t researcher .
 
 ## Recommended Models
 
-| Use case | Model | VRAM |
-|----------|-------|------|
-| Heavy (reports) | `Qwen3.5-27B-Q4_K_M` | ~18GB |
-| Heavy (reports) | `Qwen3.5-9B-Q4_K_M` | ~6GB |
-| Fast (planner/summarizer) | `Qwen3.5-4B-Q4_K_M` | ~3GB |
-| Cloud | `gpt-4o-mini` | — |
+`Qwen3.5-4B-Q4_K_M` is the recommended model — it runs on ~3GB VRAM and produces excellent research reports.
+
+| Model | VRAM | Notes |
+|-------|------|-------|
+| `Qwen3.5-4B-Q4_K_M` | ~3GB | Recommended — fast, high quality |
+| `Qwen3.5-9B-Q4_K_M` | ~6GB | Larger, marginal gains for most queries |
+| `gpt-4o-mini` | — | Cloud alternative |
 
 Set `STRIP_THINKING_TOKENS=true` for all Qwen3 models to strip internal `<think>` tokens from responses.
 
