@@ -118,7 +118,10 @@ fn extract_text(html: &str, max_chars: usize) -> ExtractedPage {
             break;
         }
 
-        let chunk = if text.len() > remaining { &text[..remaining] } else { &text };
+        let cut = (0..=remaining.min(text.len())).rev()
+            .find(|&i| text.is_char_boundary(i))
+            .unwrap_or(0);
+        let chunk = &text[..cut];
         parts.push(chunk.to_string());
         total += chunk.len();
     }

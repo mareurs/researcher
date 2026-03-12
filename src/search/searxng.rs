@@ -72,29 +72,43 @@ pub async fn search(
 
 /// Filter out domains that predominantly host non-English content.
 fn is_non_english_domain(url: &str) -> bool {
-    // Extract hostname
-    let host = url
-        .split("://")
-        .nth(1)
-        .unwrap_or("")
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .trim_start_matches("www.");
+    // Extract hostname (without www. prefix)
+    let after_scheme = url.split("://").nth(1).unwrap_or("");
+    let host = after_scheme.split('/').next().unwrap_or("").trim_start_matches("www.");
+    let hostname = host.split(':').next().unwrap_or(host); // strip port
 
-    const NON_ENGLISH: &[&str] = &[
-        "zhihu.com",
-        "baidu.com",
-        "csdn.net",
-        "cnblogs.com",
-        "163.com",
-        "sina.com.cn",
-        "weibo.com",
-        "bilibili.com",
-        "juejin.cn",
-        "segmentfault.com",
-        "tieba.baidu.com",
+    // Explicit non-English domain blocklist
+    const NON_ENGLISH_DOMAINS: &[&str] = &[
+        // Chinese
+        "zhihu.com", "baidu.com", "csdn.net", "cnblogs.com",
+        "163.com", "sina.com.cn", "weibo.com", "bilibili.com",
+        "juejin.cn", "segmentfault.com", "tieba.baidu.com",
+        // French
+        "commentcamarche.net", "lesnumeriques.com", "clubic.com", "01net.com",
     ];
+    if NON_ENGLISH_DOMAINS.iter().any(|d| hostname == *d || hostname.ends_with(&format!(".{d}"))) {
+        return true;
+    }
 
-    NON_ENGLISH.iter().any(|d| host == *d || host.ends_with(&format!(".{d}")))
+    // Country-code TLDs that consistently produce non-English results.
+    // Does NOT include .io/.ai/.co/.me/.tv/.app which are used extensively for English sites.
+    const NON_ENGLISH_TLDS: &[&str] = &[
+        ".fr", ".de", ".ru", ".jp", ".cn", ".it", ".es", ".pt",
+        ".nl", ".pl", ".cz", ".ro", ".bg", ".hu", ".sk", ".hr",
+        ".si", ".dk", ".se", ".no", ".fi", ".at", ".be",
+        ".gr", ".tr", ".ua", ".by", ".kz",
+    ];
+    if NON_ENGLISH_TLDS.iter().any(|tld| hostname.ends_with(tld)) {
+        return true;
+    }
+
+    // URL path language prefixes — e.g. chatgpt.org/fr?... or example.com/de/docs
+    let path = after_scheme.splitn(2, '/').nth(1).unwrap_or("");
+    // first path segment before / or ?
+    let first_seg = path.split('/').next().unwrap_or("").split('?').next().unwrap_or("");
+    const PATH_LANG_CODES: &[&str] = &[
+        "fr", "de", "es", "it", "pt", "nl", "pl",
+        "ru", "ja", "zh", "ko", "ar", "tr", "sv", "da", "fi", "no",
+    ];
+    PATH_LANG_CODES.iter().any(|code| first_seg == *code)
 }

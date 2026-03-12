@@ -26,9 +26,24 @@ volumes:
   tei-rerank-cache:
 
 services:
-  # ── SearXNG: private metasearch ────────────────────────────────────────────
+  # ── Tor SOCKS proxy: anonymise web-scraping search engines ────────────────
+  # SearXNG routes Google/DDG/Bing through this to avoid IP rate limits.
+  # Brave API goes direct (API key auth, no scraping).
+  tor:
+    image: dperson/torproxy:latest
+    container_name: tor
+    networks:
+      - ai-infra-net
+    restart: unless-stopped
+
+  # ── SearXNG: private metasearch (built from local source) ───────────────────
+  # Source: ../searxng/ (cloned from github.com/searxng/searxng)
+  # Rebuild after code changes: docker compose build searxng
   searxng:
-    image: searxng/searxng:latest
+    build:
+      context: ../searxng
+      dockerfile: Dockerfile.dev
+    image: researcher-searxng:dev
     container_name: searxng
     networks:
       - ai-infra-net
@@ -39,6 +54,8 @@ services:
       - ../config/searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
       - SEARXNG_BASE_URL=http://localhost:4000/
+    depends_on:
+      - tor
     restart: unless-stopped
 
   # ── llama.cpp: OpenAI-compatible LLM, NVIDIA A5000 only ───────────────────
@@ -52,7 +69,7 @@ services:
     ports:
       - "30080:8080"
     volumes:
-      - ${LLAMA_MODELS_PATH:-/home/marius/.lmstudio/models}:/models:ro
+      - ${LLAMA_MODELS_PATH:-/path/to/your/models}:/models:ro
     environment:
       - LLAMA_ARG_MODEL=/models/${LLAMA_MODEL:-bartowski/Qwen_Qwen3.5-27B-GGUF/Qwen_Qwen3.5-27B-Q4_K_M.gguf}
       - LLAMA_ARG_HOST=0.0.0.0
@@ -88,7 +105,7 @@ services:
     ports:
       - "30081:8080"
     volumes:
-      - ${LLAMA_MODELS_PATH:-/home/marius/.lmstudio/models}:/models:ro
+      - ${LLAMA_MODELS_PATH:-/path/to/your/models}:/models:ro
     environment:
       - LLAMA_ARG_MODEL=/models/${LLAMA_FAST_MODEL:-unsloth/Qwen3.5-4B-GGUF/Qwen3.5-4B-Q4_K_M.gguf}
       - LLAMA_ARG_HOST=0.0.0.0

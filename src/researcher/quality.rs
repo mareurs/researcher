@@ -1,4 +1,4 @@
-use tracing::debug;
+use tracing::{debug, info};
 
 use super::crawler::ScrapedSource;
 use crate::config::Config;
@@ -105,23 +105,30 @@ pub fn filter_sources(
             let min_words = if is_snippet_fallback { 8 } else { cfg.min_content_words };
 
             if source.word_count < min_words {
-                debug!(url = %source.url, words = source.word_count, "quality: dropping thin content");
+                info!(url = %source.url, words = source.word_count, min = min_words, snippet_fallback = is_snippet_fallback, "quality: dropping thin content");
                 return None;
             }
             if !is_snippet_fallback && source.paywall_detected {
-                debug!(url = %source.url, "quality: dropping paywalled content");
+                info!(url = %source.url, "quality: dropping paywalled content");
                 return None;
             }
-            if !is_snippet_fallback && quality.text_density < cfg.min_text_density {
-                debug!(url = %source.url, density = quality.text_density, "quality: dropping low-density page");
+            // Skip density check when word count is high — sites like GitHub wrap
+            // rich content in large HTML shells (React SSR + embedded JSON state),
+            // making density artificially low despite plenty of extracted text.
+            let density_ok = is_snippet_fallback
+                || source.word_count >= 200
+                || quality.text_density >= cfg.min_text_density;
+            if !density_ok {
+                info!(url = %source.url, density = quality.text_density, words = source.word_count, min = cfg.min_text_density, "quality: dropping low-density page");
                 return None;
             }
 
+            debug!(url = %source.url, words = source.word_count, density = quality.text_density, "quality: keeping source");
             Some((source, quality))
         })
         .collect();
 
-    debug!(before, after = result.len(), "quality filter complete");
+    info!(before, after = result.len(), "quality filter complete");
     result
 }
 

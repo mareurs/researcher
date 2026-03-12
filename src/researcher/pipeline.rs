@@ -9,7 +9,7 @@ use crate::embeddings::reranker::RerankerClient;
 use crate::researcher::quality::{assess_quality, filter_sources};
 use crate::llm::client::LlmClient;
 use super::crawler::{crawl_all, ScrapedSource};
-use super::planner::generate_queries;
+use super::planner::{broaden_queries, generate_queries};
 use super::publisher::{format_report, write_report};
 use super::summarizer::summarize_all;
 
@@ -229,7 +229,7 @@ pub async fn run(
 
     // 4. Plan
     on_progress(ProgressEvent::Planning);
-    let queries = generate_queries(planner_llm, topic, max_queries, &domains, &request.target).await?;
+    let mut queries = generate_queries(planner_llm, topic, max_queries, &domains, &request.target).await?;
     on_progress(ProgressEvent::Queries(queries.clone()));
 
     // 5. Crawl (deep mode uses overridden max_sources_per_query)
@@ -282,7 +282,7 @@ pub async fn run(
         on_progress(ProgressEvent::Deduplicating { total: quality_sources.len() });
         let embed = EmbedClient::new(&cfg.embed_base_url);
         let just_sources: Vec<ScrapedSource> = quality_sources.into_iter().map(|(s, _q)| s).collect();
-        let deduped = deduplicate(&embed, just_sources, cfg.dedup_threshold).await;
+        let deduped = deduplicate(&embed, just_sources, cfg.dedup_threshold, cfg.max_sources_per_query).await;
 
         // Re-assess quality after dedup (lost annotations during dedup)
         let quality_sources: Vec<_> = deduped
@@ -327,14 +327,44 @@ pub async fn run(
     };
 
     // 9. Summarize concurrently
+    info!(count = sources.len(), "sources entering summarizer (post-filter/dedup/rerank)");
     on_progress(ProgressEvent::Summarizing { total: sources.len() });
-    let summaries = summarize_all(summarizer_llm, &sources, topic).await;
-    info!(summaries = summaries.len(), "summarization complete");
-    on_progress(ProgressEvent::SummarizingComplete { summaries: summaries.len() });
+    let first_summaries = summarize_all(summarizer_llm, &sources, topic).await;
+    info!(summaries = first_summaries.len(), "summarization complete");
+    on_progress(ProgressEvent::SummarizingComplete { summaries: first_summaries.len() });
 
-    if summaries.is_empty() {
-        anyhow::bail!("All source summaries were empty or irrelevant.");
-    }
+    // 9b. Recovery: if all summaries were irrelevant, retry with broader queries
+    let summaries = if first_summaries.is_empty() {
+        warn!("all summaries empty or irrelevant — retrying with broader queries");
+        on_progress(ProgressEvent::RetryingWithBroaderQueries);
+
+        let broader = broaden_queries(planner_llm, topic, &queries, max_queries, &domains, &request.target).await?;
+        queries = broader.clone();
+        on_progress(ProgressEvent::Queries(broader.clone()));
+
+        on_progress(ProgressEvent::Crawling { total: broader.len() });
+        let retry_raw = crawl_all(&http, cfg_ref, &broader).await;
+        info!(sources = retry_raw.len(), "retry crawl complete");
+
+        on_progress(ProgressEvent::QualityFiltering { total: retry_raw.len() });
+        let retry_quality = filter_sources(retry_raw, &request.target, cfg);
+
+        // Skip embed dedup/rerank on retry — fewer sources, no benefit from aggressive filtering
+        let retry_sources: Vec<ScrapedSource> = retry_quality.into_iter().map(|(s, _)| s).collect();
+        on_progress(ProgressEvent::CrawlComplete { sources: retry_sources.len() });
+
+        on_progress(ProgressEvent::Summarizing { total: retry_sources.len() });
+        let retry_summaries = summarize_all(summarizer_llm, &retry_sources, topic).await;
+        info!(summaries = retry_summaries.len(), "retry summarization complete");
+        on_progress(ProgressEvent::SummarizingComplete { summaries: retry_summaries.len() });
+
+        if retry_summaries.is_empty() {
+            anyhow::bail!("All source summaries were empty or irrelevant.");
+        }
+        retry_summaries
+    } else {
+        first_summaries
+    };
 
     // 10. Write report (streaming if token_tx provided)
     on_progress(ProgressEvent::WritingReport);
@@ -372,6 +402,7 @@ pub enum ProgressEvent {
     Summarizing { total: usize },
     SummarizingComplete { summaries: usize },
     WritingReport,
+    RetryingWithBroaderQueries,
     Done,
 }
 
@@ -388,6 +419,7 @@ impl std::fmt::Display for ProgressEvent {
             Self::Summarizing { total } => write!(f, "🧠 Summarizing {} sources concurrently...", total),
             Self::SummarizingComplete { summaries } => write!(f, "✅ {} relevant summaries", summaries),
             Self::WritingReport => write!(f, "📝 Writing final report..."),
+            Self::RetryingWithBroaderQueries => write!(f, "🔄 No results found — retrying with broader queries..."),
             Self::Done => write!(f, "✅ Research complete"),
         }
     }

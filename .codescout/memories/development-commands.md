@@ -1,27 +1,34 @@
 # Development Commands
 
-See CLAUDE.md for the primary command reference. Additions below.
+See CLAUDE.md for the canonical build/run/Docker commands. This supplements with workflow details.
 
 ## Before Completing Work
-1. `cargo check` — fast type-check (no link)
-2. `cargo build --release` — full build (LTO + strip); confirms both binaries compile
-3. Manual smoke test if changing pipeline logic (no automated tests exist)
+1. `cargo check` — fast type check (seconds)
+2. `cargo clippy -- -D warnings` — must pass clean
+3. `cargo build --release` — full build with LTO (~30-60s); required before testing MCP tools
+4. If adding a Config field: verify BOTH `Config` (src/config.rs) AND `config_from_env()` (src/mcp_server.rs) are updated
+5. If adding an MCP tool: update `get_info()` in `src/mcp_server.rs` with a bullet for the new tool
 
-## Gotchas for Build
-- Release profile uses LTO + `codegen-units=1` — slow but produces small binary (~6-7MB)
-- Both binaries share the same `src/` module tree — changes to shared modules affect both
-- `profiles.toml` must exist at the **working directory** when running; missing = silent empty profiles
+## Testing MCP After Changes
+The `researcher-mcp` binary is loaded once at MCP server start.
+After `cargo build --release`: restart MCP server (`/mcp` → restart in Claude Code, or restart the session).
+Do NOT test via `mcp__researcher__*` tools without rebuilding first.
 
-## Quick Local Test (no Docker)
+## Infra Stack
+Two separate docker-compose stacks (NOT the single-compose described in CLAUDE.md):
 ```bash
-LLM_BASE_URL=http://localhost:8080/v1 \
-SEARXNG_URL=http://localhost:4000 \
-RUST_LOG=info \
-cargo run --bin researcher -- --query "test topic"
-```
+# Start shared AI infra (SearXNG, llama-cpp heavy+fast, TEI embed+rerank)
+cd infra && docker compose up -d
 
-## MCP Binary Config (env-only, no CLI flags)
-```bash
-LLM_BASE_URL=... SEARXNG_URL=... cargo run --bin researcher-mcp
+# Start researcher app (joins ai-infra-net)
+docker compose up -d   # from repo root
 ```
-The MCP binary ignores all clap args — everything is env vars via `config_from_env()`.
+The Makefile at root wraps some of these targets.
+
+## Environment Setup
+```bash
+cp .env.example .env   # then edit LLM_BASE_URL, SEARXNG_URL, etc.
+```
+Key non-obvious env vars not shown in CLAUDE.md:
+- `RERANK_MIN_SCORE` — cross-encoder logit threshold (default -5.0); increase to be more selective
+- `LLM_FAST_STAGES` — comma-separated; default `planner,summarizer`; add `publisher` to route all to fast

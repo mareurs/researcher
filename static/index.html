@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Researcher</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
     body { font-family: 'Inter', sans-serif; }
@@ -125,7 +125,7 @@
     const errorPanel    = document.getElementById('error-panel');
     const errorMsg      = document.getElementById('error-msg');
 
-    marked.setOptions({ breaks: true, gfm: true });
+    marked.use({ breaks: true, gfm: true });
 
     function setLoading(on) {
       submitBtn.disabled = on;

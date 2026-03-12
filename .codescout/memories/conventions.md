@@ -1,42 +1,57 @@
 # Conventions
 
+See CLAUDE.md § Rust Coding Standards for the full style guide. This file captures patterns discovered during exploration that aren't in CLAUDE.md.
+
 ## Naming
+
 | Entity | Convention | Example |
-|--------|-----------|---------|
-| Async functions | `async fn` everywhere in pipeline | `run()`, `crawl_all()`, `summarize_all()` |
-| Progress callbacks | `impl Fn(ProgressEvent)` passed into `run()` | `\|ev\| eprintln!("[researcher] {ev}")` |
-| MCP tool methods | `async fn` on `ResearcherServer`, `#[tool(...)]` attribute | `research_person()` |
-| Config fields | snake_case matching env var name lowercased | `llm_base_url` ↔ `LLM_BASE_URL` |
-| Error returns | `anyhow::Result<T>` everywhere; `format!("Error: {e:#}")` at MCP boundary | |
+|---|---|---|
+| Pipeline stage functions | verb_noun free fn | `generate_queries()`, `crawl_all()`, `summarize_all()`, `write_report()` |
+| LLM client constructors | `new()` (heavy) / `new_fast()` (fast) | `LlmClient::new(cfg)`, `LlmClient::new_fast(cfg)` |
+| MCP input structs | `<Tool>Input` | `ResearchInput`, `JobSearchInput`, `MarketInsightInput` |
+| Progress events | PascalCase enum variants, no payload for state signals | `ProgressEvent::Planning`, `ProgressEvent::Queries(vec)` |
+| Config env var | SCREAMING_SNAKE matching clap long name | `--llm-base-url` → `LLM_BASE_URL` |
 
 ## Patterns
 
-### Error handling
-- Internal: `?` propagation with `anyhow::Result`
-- At MCP boundary: `match run(...) { Ok(r) => ..., Err(e) => format!("Error: {e:#}") }`
-- Search failures: logged via `warn!(%e, ...)` and swallowed (returns empty vec)
-- Scrape failures: per-URL `warn!` + `filter_map` drops failed entries
+### Error Handling
+- All public functions return `Result<T, anyhow::Error>` via `?`
+- Scrape failures in `crawl_query()`: fall back to search snippet, do NOT propagate
+- Summarize failures in `summarize_all()`: silently drop with `warn!()`, not panic
+- Rerank failure: fall back to dedup/original order
+- MCP tools: catch all errors and return `format!("Error: {e:#}")` as String
 
-### LLM calls
-- Non-streaming: `llm.complete(messages).await` — used in planner, summarizer, MCP, HTTP-JSON
-- Streaming: `llm.stream(messages, tx).await` — used only in CLI and HTTP SSE
-- Both paths apply `strip_thinking` if configured (Qwen3 `<think>` blocks)
+### LLM Prompt Conventions
+- Prepend `/no_think` to system prompts for planner and summarizer (Qwen3 convention)
+- JSON output requested via explicit schema in system prompt
+- JSON parse failures: fall back to treating full response as plain text
 
-### Config loading (two paths)
-- `researcher` binary: `clap` derive on `Config` struct — CLI flags + env vars merged by clap
-- `researcher-mcp` binary: `config_from_env()` local function reads env directly
+### Thinking Token Suppression (three mechanisms — keep in sync)
+1. `/no_think` prefix in system prompt (planner, summarizer) — Qwen3 chat template
+2. `disable_thinking: true` in LlmClient → sends `chat_template_kwargs: {"enable_thinking": false}` — llama.cpp extension, fast client always sets this
+3. `STRIP_THINKING_TOKENS=true` → post-hoc strips `<think>...</think>` — applies in both client.rs complete() AND stream.rs
 
-### Async concurrency
-- Within-query URL fetches: `join_all(futs)` in `crawl_query()`
-- Summarization: `join_all(futs)` in `summarize_all()` — ALL sources concurrent
-- Cross-query crawl: sequential loop in `crawl_all()` to share `visited_urls`
+### Fast LLM Stage Routing
+```rust
+// run() stage assignment pattern:
+let effective_fast = request.fast_stages.as_deref().unwrap_or(&cfg.llm_fast_stages);
+let planner_llm = if effective_fast.contains("planner") { &llm_fast } else { &llm };
+```
 
-## Code Quality
-- No formatter config found — use standard `rustfmt`
-- `cargo check` for fast type-check; `cargo build --release` for full build
-- `RUST_LOG=info` / `RUST_LOG=debug` controls tracing output
-- **No test suite exists** — verify by running the binaries manually
+### Cloning LlmClient for Concurrency
+`LlmClient` clones are cheap — the inner `reqwest::Client` is Arc-backed. Clone per async future in `join_all`:
+```rust
+let futs = sources.iter().map(|s| summarize_source(llm.clone(), s, topic));
+join_all(futs).await
+```
 
 ## Testing
-No test framework configured. No test files. Manual verification only.
-See CLAUDE.md for run commands.
+No Rust tests. Verify changes with `cargo check` (fast) then `cargo build --release` (full LTO, ~30-60s).
+Python tests exist in `tests/model/` for a planned cross-encoder module that isn't implemented yet (untracked in git).
+
+## Code Quality
+```bash
+cargo check            # fast type check
+cargo clippy -- -D warnings   # must pass clean
+cargo build --release  # final verification before shipping
+```

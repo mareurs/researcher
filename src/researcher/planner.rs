@@ -115,10 +115,10 @@ pub async fn generate_queries(
              Write queries as plain search terms — no dashes between concepts, no special operators.".to_string()
         }
         ResearchTarget::Topic => {
-            "You are a research planning assistant. Your job is to decompose a research \
-             topic into specific, focused search queries that together will provide \
-             comprehensive coverage of the topic. Each query should target a different \
-             angle or subtopic. Be specific and use natural language search terms. \
+            "You are a research planning assistant. The current year is 2026.\n\
+             Your job is to decompose a research topic into specific, focused search queries \
+             that together will provide comprehensive coverage of the topic. Each query should \
+             target a different angle or subtopic. Be specific and use natural language search terms. \
              IMPORTANT: If the topic contains ambiguous terms that could refer to multiple \
              things (e.g. a programming language name that is also a common word or product), \
              always include disambiguating context in every query — for example, prefer \
@@ -207,5 +207,80 @@ pub async fn generate_queries(
         .collect();
 
     info!(count = queries.len(), ?queries, "generated search queries");
+    Ok(queries)
+}
+
+/// Broaden a set of queries that returned no relevant results.
+/// Strips overly specific terms (exact years, narrow model names) and
+/// generates more general alternatives while preserving the research intent.
+pub async fn broaden_queries(
+    llm: &LlmClient,
+    topic: &str,
+    failed_queries: &[String],
+    max_queries: usize,
+    domains: &[String],
+    target: &crate::researcher::pipeline::ResearchTarget,
+) -> Result<Vec<String>> {
+    info!(%topic, "broadening failed queries");
+
+    use crate::researcher::pipeline::ResearchTarget;
+
+    let failed_list = failed_queries.join("\n");
+
+    let domain_instruction = if !domains.is_empty()
+        && !matches!(target, ResearchTarget::Person { .. } | ResearchTarget::Company | ResearchTarget::Market { .. })
+    {
+        let domain_list = domains
+            .iter()
+            .map(|d| format!("site:{d}"))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let allowed = domains.join(", ");
+        format!(
+            "\n\nIMPORTANT: Restrict ALL queries to these domains only. Each query MUST include a site filter.\n\
+             Example format: your search terms {domain_list}\n\
+             Allowed domains: {allowed}"
+        )
+    } else {
+        String::new()
+    };
+
+    let messages = vec![
+        ChatMessage::system(
+            "/no_think\n\
+             You are a research planning assistant. The current year is 2026.\n\
+             Your job is to reformulate failed search queries into broader, more general alternatives \
+             that are more likely to find relevant content.\n\
+             Rules for broadening:\n\
+             - Remove exact year ranges (e.g. drop '2024 2025', use '2026' or no year)\n\
+             - Replace overly specific model/dataset names with the general category \
+               (e.g. 'DeBERTa MS MARCO' → 'transformer reranker')\n\
+             - Keep the core research intent and domain\n\
+             - Try different angles: tutorials, papers, implementations, comparisons\n\
+             Write queries as plain search terms only — no special operators except site: filters."
+                .to_string(),
+        ),
+        ChatMessage::user(format!(
+            "Research topic: {topic}\n\n\
+             The following specific queries returned no relevant results:\n{failed_list}\n\n\
+             Generate exactly {max_queries} broader, more general search queries for the same topic. \
+             Each query should be on its own line, with no numbering, bullets, quotes, or extra \
+             formatting — just the raw query text.{domain_instruction}",
+        )),
+    ];
+
+    let response = llm.complete(messages).await?;
+
+    let queries: Vec<String> = response
+        .lines()
+        .map(|l| l.trim().trim_start_matches(['-', '*', '•', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.', ')', '"']))
+        .map(|l| l.trim_end_matches(['"', '.', ',']))
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && l.len() > 5)
+        .take(max_queries)
+        .map(|q| disambiguate_topic(q))
+        .collect();
+
+    info!(count = queries.len(), ?queries, "broadened search queries");
     Ok(queries)
 }

@@ -38,10 +38,35 @@ fn domain_from_url(url: &str) -> String {
 /// Domains that consistently return off-topic results and should never be scraped.
 /// e.g. "Rust" the game showing up in Rust programming language searches.
 const DOMAIN_BLACKLIST: &[&str] = &[
+    // Games / off-topic
     "rust.facepunch.com",
     "store.steampowered.com",
     "city-data.com",
     "facepunch.com",
+    // AI chat front-ends (not research content)
+    "chatgpt.com",
+    "chatgpt.org",
+    "claude.ai",
+    "gemini.google.com",
+    "copilot.microsoft.com",
+    "character.ai",
+    // Google utility pages (no research content)
+    "support.google.com",
+    "accounts.google.com",
+    "translate.google.com",
+    "policies.google.com",
+    // English-grammar Q&A / language forums (noise for queries with common words)
+    "ell.stackexchange.com",
+    "wordreference.com",
+    // Retail / unrelated sites that match on generic words ("running", "best", etc.)
+    "rei.com",
+    "amazon.com",
+    "ebay.com",
+    // Education platforms that surface on queries with words like "benchmarks", "top"
+    "tophat.com",
+    "coursera.org",
+    "udemy.com",
+    "khanacademy.org",
 ];
 
 
