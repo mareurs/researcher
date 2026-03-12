@@ -1,37 +1,45 @@
 # Gotchas & Known Issues
 
-## Configuration
+## Config Drift
+- **Problem:** `config_from_env()` in `src/mcp_server.rs` is a hand-maintained duplicate of `Config`. Adding a new field to `Config` without also adding it to `config_from_env()` causes the MCP binary to silently use the wrong default.
+  **Fix:** Always update BOTH files. Search for an existing env var name in `mcp_server.rs` to find the pattern.
 
-- **MCP binary has separate config loading** — `config_from_env()` in `src/mcp_server.rs:307` is NOT the same as the clap `Config`. If you add a new config field to `Config`, you must also add it to `config_from_env()` manually.
+## Thinking Token Suppression — Three Mechanisms
+- **Problem:** Three overlapping mechanisms suppress thinking tokens: `/no_think` prompt prefix, `STRIP_THINKING_TOKENS` post-processing, and `disable_thinking` flag sending `chat_template_kwargs`. Changing one without awareness of the others can cause unexpected behavior.
+  **Fix:** See conventions memory for which stages use which mechanism.
 
-- **`profiles.toml` must exist at the working directory** — Missing file silently produces empty profiles map and no job-profile. `load_profiles()` and `load_job_profile()` both swallow errors; no warning is emitted.
+## Fast LLM Falls Back Silently
+- **Problem:** If `LLM_FAST_BASE_URL` is empty, `LlmClient::new_fast()` uses the heavy backend URL/model but still sets `disable_thinking = true`. Planner/summarizer always disable thinking even on single-GPU setups.
+  **Fix:** Expected behavior — just be aware the fast client always has thinking disabled.
 
-- **`EMBED_BASE_URL` empty = dedup disabled** — An empty string (the default) fully skips the embedding pipeline. Dedup and reranking only run when the env var is set to a real TEI endpoint.
+## `shopping-ro` Profile Domain Filtering Bug
+- **Problem:** `searxng.rs::is_non_english_domain()` filters TLDs like `.ro`, `.de`, `.fr` etc. The `shopping-ro` profile targets Romanian sites (olx.ro etc.) but SearXNG results from `.ro` domains get filtered out.
+  **Fix:** Either add an exception to `is_non_english_domain()` for explicitly requested domains, or configure SearXNG to return results without TLD filtering for this profile. (Verify filter logic at `src/search/searxng.rs`.)
 
-## Pipeline Behavior
+## Job Search Uncapped Concurrency in Deep Mode
+- **Problem:** `write_job_report()` deep mode calls `run()` recursively for top 5 companies via `join_all` — no rate limiting or concurrency cap. Can saturate the LLM backend.
+  **Fix:** Wrap with a semaphore or process sequentially if LLM backend struggles.
 
-- **`crawl_all()` is NOT fully parallel** — Queries execute sequentially in a for loop (`src/researcher/crawler.rs:100`). The README and docs say "parallel per query" — this refers to URL fetches within a single query, not the queries themselves. This is intentional (shared `visited_urls`).
+## Job Scoring Prompt Unbounded Size
+- **Problem:** `score_listings()` sends ALL job listings in a single LLM call. With many listings, prompt can be very long → truncation → silently wrong scores.
+  **Fix:** Add batching if listing count is high. No fix currently in code.
 
-- **`Quick` mode returns `report: None`** — Callers must handle `ResearchResult.report` being `Option<String>`. The MCP `research` tool serializes the whole struct as JSON, so clients see `"report": null`.
+## `crawl_all()` is Sequential by Design
+- **Problem:** 4 sub-queries run sequentially (not in parallel). This adds latency on slow search backends.
+  **Fix:** Parallelizing requires `Arc<Mutex<HashSet<String>>>` for visited URL sharing. Not a bug, but a deliberate tradeoff. See `src/researcher/crawler.rs` comment.
 
-- **`anyhow::bail!` on empty sources** — If SearXNG is unreachable AND DuckDuckGo fails, `run()` returns an error. The MCP tool converts this to an error string. Verify SearXNG URL before debugging LLM issues.
+## `write_code_report()` Dead Code
+- **Problem:** `write_code_report()` has `#[allow(dead_code)]` attribute but is called from the `research_code` MCP tool. The compiler warning was suppressed rather than fixed.
+  **Fix:** Investigate whether the dead-code lint is from a module visibility issue; remove the allow attribute once resolved.
 
-## Code Duplication
+## Python Infrastructure is a Skeleton
+- **Problem:** `src/model/`, `src/training/`, `src/data/`, `src/eval/`, `src/export/` are empty `__init__.py` stubs. `tests/model/test_cross_encoder.py` imports `src.model.cross_encoder` which doesn't exist. Tests will fail if run.
+  **Context:** This is groundwork for planned fine-tuning of a custom cross-encoder reranker. Not production code.
 
-- **`strip_thinking` duplicated** — `strip_thinking()` in `src/llm/client.rs:144` and `strip_think()` in `src/llm/stream.rs:97` are near-identical. If you fix a bug in one, fix the other.
+## Docker Stack Split (CLAUDE.md is Outdated)
+- **Problem:** CLAUDE.md describes a single `docker compose --profile local-llm up` command. The actual setup uses two separate stacks: `infra/docker-compose.yml` (AI infra) and root `docker-compose.yml` (researcher app), coordinated via the external `ai-infra-net` Docker network.
+  **Fix:** Use Makefile targets or start stacks manually in order (infra first, then app).
 
-## Job Search
-
-- **`search_jobs` requires `[job-profile]` in profiles.toml** — The tool returns a user-visible error string (not an Err) if the profile is missing. Verify `load_job_profile()` returns `Some` before debugging scorer failures.
-
-- **Score threshold is hardcoded to 6** — `score_listings(&llm, &listings, &profile, 6)` in `src/mcp_server.rs:240`. Not configurable via env or MCP input currently.
-
-## Build Warnings (expected, not real dead code)
-
-- **`src/jobs/` functions show dead-code warnings when building the `researcher` binary** — `fetch_jobs`, `fetch_remotive`, `fetch_adzuna`, `fetch_searxng`, `score_listings`, `write_job_report` are only called from `researcher-mcp`. Because each binary is compiled independently, the `researcher` binary sees them as unused. These warnings are false positives — the code is live in the MCP binary. Do not delete these functions based on the warnings.
-
-- **`ResearchTarget::Person` and `::Company` variants flagged unused in `researcher` binary** — Same reason: they're only constructed in `src/mcp_server.rs`. Safe to ignore.
-
-## No Tests
-
-- **Zero test suite** — There are no test files. All verification is manual. Be careful when refactoring shared modules (config, llm, search) — breakage won't be caught automatically.
+## RERANK_MIN_SCORE Not in CLAUDE.md
+- **Problem:** `RERANK_MIN_SCORE` env var (default -5.0 logits) is implemented but missing from CLAUDE.md's env var reference table. Can't be discovered from docs alone.
+  **Fix:** Set in `.env` if you want stricter reranking. Check `src/embeddings/reranker.rs` for current default.

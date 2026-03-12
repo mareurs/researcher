@@ -18,6 +18,7 @@ pub async fn deduplicate(
     client: &EmbedClient,
     sources: Vec<ScrapedSource>,
     threshold: f32,
+    min_keep: usize,
 ) -> Vec<ScrapedSource> {
     if sources.len() <= 1 {
         return sources;
@@ -39,6 +40,7 @@ pub async fn deduplicate(
     };
 
     let mut kept: Vec<usize> = Vec::new();
+    let mut dropped: Vec<usize> = Vec::new();
 
     'outer: for (i, emb_i) in embeddings.iter().enumerate() {
         for &j in &kept {
@@ -50,10 +52,24 @@ pub async fn deduplicate(
                     url_j = %sources[j].url,
                     "dedup: dropping near-duplicate"
                 );
+                dropped.push(i);
                 continue 'outer;
             }
         }
         kept.push(i);
+    }
+
+    // Ensure we never drop below min_keep: backfill from dropped sources
+    // (in original search-rank order) until we reach the floor.
+    if kept.len() < min_keep {
+        for i in dropped {
+            if kept.len() >= min_keep {
+                break;
+            }
+            debug!(i, url = %sources[i].url, "dedup: reinstating to meet min_keep floor");
+            kept.push(i);
+        }
+        kept.sort_unstable(); // restore original search-rank order
     }
 
     let before = sources.len();

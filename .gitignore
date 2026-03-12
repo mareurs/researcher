@@ -20,3 +20,13 @@ output/
 wandb/
 runs/
 .venv/
+
+# Multi-repo: external projects cloned locally
+/searxng/
+
+# Personal files not for publication
+kedos-srl-review.md
+.mcp.json
+
+# Internal AI-assisted planning docs (superpowers scaffolding)
+docs/superpowers/

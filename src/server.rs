@@ -134,7 +134,7 @@ async fn research_stream(
                 },
             };
             let json = serde_json::to_string(&msg).unwrap_or_default();
-            let _ = tx_progress.blocking_send(
+            let _ = tx_progress.try_send(
                 axum::response::sse::Event::default().data(json),
             );
         }, Some(token_tx))

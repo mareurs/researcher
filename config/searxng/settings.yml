@@ -1,7 +1,13 @@
 # Minimal SearXNG config for Researcher
 # Enables JSON output format and disables the web UI rate limiter.
 
-use_default_settings: true
+use_default_settings:
+  engines:
+    keep_only:
+      - google
+      - duckduckgo
+      - bing
+      - wikipedia
 
 general:
   instance_name: "Researcher SearXNG"
@@ -20,8 +26,15 @@ server:
   limiter: false   # Disable rate limiting for local use
   image_proxy: false
 
+outgoing:
+  # Tor proxy for web-scraping engines (Google, DDG, Bing)
+  # Prevents IP-based rate limits and CAPTCHAs
+  proxies:
+    all://:
+      - socks5h://tor:9050
+  using_tor_proxy: true
+
 engines:
-  # Keep only reliable engines; comment out any that need API keys
   - name: google
     engine: google
     shortcut: g
@@ -34,9 +47,15 @@ engines:
     engine: bing
     shortcut: bi
     disabled: false
-  - name: brave
-    engine: brave
-    shortcut: brave
+  # Brave Search API — no rate limits, no CAPTCHAs
+  - name: braveapi
+    engine: braveapi
+    shortcut: brapi
+    api_key: BSAJigmnkYhedoulk_jOMN96nfEoS47
+    disabled: false
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
     disabled: false
 
 ui:

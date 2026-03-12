@@ -472,6 +472,9 @@ async fn main() -> Result<()> {
 
     tracing::info!(
         llm_base_url = %cfg.llm_base_url,
+        llm_fast_base_url = %cfg.llm_fast_base_url,
+        llm_fast_model = %cfg.llm_fast_model,
+        llm_fast_stages = ?cfg.llm_fast_stages,
         searxng_url = %cfg.searxng_url,
         model = %cfg.llm_model,
         "researcher-mcp starting"

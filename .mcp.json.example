@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "researcher": {
+      "type": "stdio",
+      "command": "/path/to/researcher-mcp",
+      "env": {
+        "LLM_BASE_URL": "http://localhost:8080/v1",
+        "LLM_MODEL": "Qwen_Qwen3.5-9B-Q4_K_M",
+        "LLM_API_KEY": "no-key-needed",
+        "LLM_MAX_TOKENS": "4096",
+        "SEARXNG_URL": "http://localhost:4000",
+        "STRIP_THINKING_TOKENS": "true",
+        "EMBED_BASE_URL": "http://localhost:8081",
+        "RERANK_BASE_URL": "http://localhost:8082",
+        "RUST_LOG": "info"
+      }
+    }
+  }
+}

@@ -8,7 +8,7 @@ encoding = "utf-8"
 tool_timeout_secs = 60
 
 [embeddings]
-model = "ollama:mxbai-embed-large"
+model = "ollama:nomic-embed-text"
 drift_detection_enabled = true
 
 [ignored_paths]
