@@ -104,7 +104,7 @@ Web UI with token streaming: http://localhost:33100/
 cp .env.example .env
 # Edit .env:
 #   LLM_BASE_URL=https://api.openai.com/v1
-#   LLM_MODEL=gpt-4o-mini
+#   LLM_MODEL=gpt-4.1-mini
 #   LLM_API_KEY=sk-...
 #   LLM_FAST_BASE_URL=   (leave empty — use same backend for all stages)
 
@@ -464,7 +464,7 @@ docker build -t researcher .
 |-------|------|-------|
 | `Qwen3.5-4B-Q4_K_M` | ~3GB | Recommended — fast, high quality |
 | `Qwen3.5-9B-Q4_K_M` | ~6GB | Larger, marginal gains for most queries |
-| `gpt-4o-mini` | — | Cloud alternative |
+| `gpt-4.1-mini` | — | Cloud alternative |
 
 Set `STRIP_THINKING_TOKENS=true` for all Qwen3 models to strip internal `<think>` tokens from responses.
 
