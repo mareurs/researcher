@@ -454,6 +454,7 @@ docker build -t researcher .
 | **vLLM** | `http://localhost:8000/v1` | Best for multi-user / high concurrency |
 | **LM Studio** | `http://localhost:1234/v1` | Desktop GUI for local models |
 | **OpenAI** | `https://api.openai.com/v1` | Set `LLM_API_KEY=sk-...` |
+| **Google Gemini** | `https://generativelanguage.googleapis.com/v1beta/openai/` | Set `LLM_API_KEY=AIza...`, model e.g. `gemini-2.0-flash` |
 | **Anthropic** | Use [LiteLLM](https://github.com/BerriAI/litellm) proxy | OpenAI-compatible wrapper |
 
 ## Recommended Models
