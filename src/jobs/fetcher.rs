@@ -111,6 +111,8 @@ async fn fetch_searxng(http: &Client, cfg: &Config, query: &str, profile: &JobPr
     let Ok(results) = search_with_fallback(
         http,
         &cfg.searxng_url,
+        &cfg.google_api_key,
+        &cfg.google_cse_id,
         &full_query,
         cfg.search_results_per_query,
     ).await else { return vec![] };

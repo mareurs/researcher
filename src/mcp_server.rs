@@ -535,6 +535,8 @@ fn config_from_env() -> Config {
             .collect(),
         searxng_url: env("SEARXNG_URL", "http://localhost:4000"),
         search_results_per_query: env_usize("SEARCH_RESULTS_PER_QUERY", 8),
+        google_api_key: env("GOOGLE_API_KEY", ""),
+        google_cse_id: env("GOOGLE_CSE_ID", ""),
         embed_base_url: env("EMBED_BASE_URL", ""),
         dedup_threshold: env_f32("DEDUP_THRESHOLD", 0.92),
         rerank_base_url: env("RERANK_BASE_URL", ""),

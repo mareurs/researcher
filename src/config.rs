@@ -100,6 +100,14 @@ pub struct Config {
     #[arg(long, env = "SEARCH_RESULTS_PER_QUERY", default_value = "8")]
     pub search_results_per_query: usize,
 
+    /// Google Custom Search API key (empty = disabled)
+    #[arg(long, env = "GOOGLE_API_KEY", default_value = "")]
+    pub google_api_key: String,
+
+    /// Google Custom Search Engine ID / cx (empty = disabled)
+    #[arg(long, env = "GOOGLE_CSE_ID", default_value = "")]
+    pub google_cse_id: String,
+
     // ── Embeddings / dedup ───────────────────────────────────────────────────
     /// TEI embedding service base URL (empty = disable dedup)
     #[arg(long, env = "EMBED_BASE_URL", default_value = "")]
