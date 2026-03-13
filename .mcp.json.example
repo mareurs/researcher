@@ -10,8 +10,8 @@
         "LLM_MAX_TOKENS": "4096",
         "SEARXNG_URL": "http://localhost:4000",
         "STRIP_THINKING_TOKENS": "true",
-        "EMBED_BASE_URL": "http://localhost:8081",
-        "RERANK_BASE_URL": "http://localhost:8082",
+        "EMBED_BASE_URL": "http://localhost:30082",
+        "RERANK_BASE_URL": "http://localhost:30083",
         "RUST_LOG": "info"
       }
     }

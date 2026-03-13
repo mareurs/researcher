@@ -163,8 +163,8 @@ cargo build --release --bin researcher-mcp
         "LLM_MODEL": "Qwen3.5-4B-Q4_K_M",
         "SEARXNG_URL": "http://localhost:4000",
         "STRIP_THINKING_TOKENS": "true",
-        "EMBED_BASE_URL": "http://localhost:8081",
-        "RERANK_BASE_URL": "http://localhost:8082"
+        "EMBED_BASE_URL": "http://localhost:30082",
+        "RERANK_BASE_URL": "http://localhost:30083"
       }
     }
   }
