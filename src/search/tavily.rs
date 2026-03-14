@@ -23,19 +23,25 @@ struct TavilyResult {
 pub async fn search(
     http: &Client,
     api_key: &str,
+    domains: &[String],
     query: &str,
     num_results: usize,
 ) -> Result<Vec<SearchResult>> {
     debug!(%query, "Tavily Search");
 
+    let mut body = serde_json::json!({
+        "query": query,
+        "max_results": num_results,
+        "search_depth": "basic"
+    });
+    if !domains.is_empty() {
+        body["include_domains"] = serde_json::json!(domains);
+    }
+
     let resp = http
         .post("https://api.tavily.com/search")
         .bearer_auth(api_key)
-        .json(&serde_json::json!({
-            "query": query,
-            "max_results": num_results,
-            "search_depth": "basic"
-        }))
+        .json(&body)
         .send()
         .await
         .context("Tavily Search request")?;
