@@ -50,6 +50,7 @@ pub async fn search(
                 title,
                 url,
                 snippet: snippet_text,
+                content: None,
             })
         })
         .take(num_results)

@@ -247,7 +247,7 @@ pub async fn run(
 
     if sources.is_empty() {
         anyhow::bail!(
-            "No sources found. SearXNG at {} returned no results or all pages failed to scrape.",
+            "No sources found. All search backends (Vertex AI, SearXNG at {}, DuckDuckGo) returned no results or all pages failed to scrape.",
             cfg.searxng_url
         );
     }

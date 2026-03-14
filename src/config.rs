@@ -100,17 +100,17 @@ pub struct Config {
     #[arg(long, env = "SEARCH_RESULTS_PER_QUERY", default_value = "8")]
     pub search_results_per_query: usize,
 
-    /// Path to gcloud binary (default "gcloud" resolves via $PATH)
-    #[arg(long, env = "GCLOUD_PATH", default_value = "gcloud")]
-    pub gcloud_path: String,
+    /// Brave Search API key (empty = disabled)
+    #[arg(long, env = "BRAVE_API_KEY", default_value = "")]
+    pub brave_api_key: String,
 
-    /// Vertex AI Search GCP project ID (empty = disabled)
-    #[arg(long, env = "VERTEX_PROJECT", default_value = "")]
-    pub vertex_project: String,
+    /// Tavily Search API key (empty = disabled)
+    #[arg(long, env = "TAVILY_API_KEY", default_value = "")]
+    pub tavily_api_key: String,
 
-    /// Vertex AI Search engine ID (empty = disabled)
-    #[arg(long, env = "VERTEX_ENGINE_ID", default_value = "")]
-    pub vertex_engine_id: String,
+    /// Exa Search API key (empty = disabled)
+    #[arg(long, env = "EXA_API_KEY", default_value = "")]
+    pub exa_api_key: String,
 
     // ── Embeddings / dedup ───────────────────────────────────────────────────
     /// TEI embedding service base URL (empty = disable dedup)
