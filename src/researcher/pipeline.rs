@@ -232,15 +232,15 @@ pub async fn run(
     let mut queries = generate_queries(planner_llm, topic, max_queries, &domains, &request.target).await?;
     on_progress(ProgressEvent::Queries(queries.clone()));
 
-    // 5. Crawl (deep mode uses overridden max_sources_per_query)
-    let mut eff_cfg;
-    let cfg_ref = if depth {
-        eff_cfg = cfg.clone();
+    // 5. Crawl — always build eff_cfg so we can propagate domain_profile from the request.
+    //    domain_profile lives on ResearchRequest (not on the base cfg), so crawl_query
+    //    needs it on the config it receives to drive backend selection.
+    let mut eff_cfg = cfg.clone();
+    eff_cfg.domain_profile = request.domain_profile.clone();
+    if depth {
         eff_cfg.max_sources_per_query = max_sources;
-        &eff_cfg
-    } else {
-        cfg
-    };
+    }
+    let cfg_ref = &eff_cfg;
     on_progress(ProgressEvent::Crawling { total: queries.len() });
     let sources = crawl_all(&http, cfg_ref, &queries).await;
     info!(sources = sources.len(), "crawl complete");
