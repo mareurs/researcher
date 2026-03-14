@@ -81,9 +81,10 @@ pub async fn crawl_query(
     let results = crate::search::search_with_fallback(
         http,
         &cfg.searxng_url,
-        &cfg.gcloud_path,
-        &cfg.vertex_project,
-        &cfg.vertex_engine_id,
+        &cfg.brave_api_key,
+        &cfg.tavily_api_key,
+        &cfg.exa_api_key,
+        cfg.domain_profile.as_deref(),
         query,
         cfg.search_results_per_query,
     )
@@ -113,8 +114,42 @@ pub async fn crawl_query(
 
     debug!(count = fresh.len(), %query, "scraping URLs");
 
-    // 3. Scrape all fresh URLs concurrently
-    let futs = fresh.iter().map(|result| {
+    // 3. Partition: pre-extracted content (Tavily/Exa) vs needs scraping
+    let (pre_extracted, needs_scraping): (Vec<_>, Vec<_>) =
+        fresh.into_iter().partition(|r| r.content.is_some());
+
+    // Build ScrapedSource for pre-extracted results — no HTTP fetch needed
+    let mut sources: Vec<ScrapedSource> = pre_extracted
+        .into_iter()
+        .map(|result| {
+            let content: String = result
+                .content
+                .unwrap()
+                .chars()
+                .take(cfg.max_page_chars)
+                .collect();
+            let domain = domain_from_url(&result.url);
+            let word_count = content.split_whitespace().count();
+            ScrapedSource {
+                url: result.url,
+                title: result.title,
+                query: query.to_string(),
+                domain,
+                word_count,
+                raw_html_len: 0,
+                link_count: 0,
+                ad_link_count: 0,
+                has_headings: false,
+                has_lists: false,
+                has_code_blocks: false,
+                paywall_detected: false,
+                content,
+            }
+        })
+        .collect();
+
+    // Scrape remaining results concurrently
+    let futs = needs_scraping.iter().map(|result| {
         let http = http.clone();
         let url = result.url.clone();
         let max_chars = cfg.max_page_chars;
@@ -127,51 +162,52 @@ pub async fn crawl_query(
 
     let scraped = join_all(futs).await;
 
-    let sources = fresh
-        .into_iter()
-        .zip(scraped)
-        .map(|(result, content)| match content {
-            Ok(page) => {
-                let domain = domain_from_url(&result.url);
-                let word_count = page.text.split_whitespace().count();
-                ScrapedSource {
-                    url: result.url,
-                    title: result.title,
-                    query: query.to_string(),
-                    domain,
-                    word_count,
-                    raw_html_len: page.raw_html_len,
-                    link_count: page.link_count,
-                    ad_link_count: page.ad_link_count,
-                    has_headings: page.has_headings,
-                    has_lists: page.has_lists,
-                    has_code_blocks: page.has_code_blocks,
-                    paywall_detected: page.paywall_detected,
-                    content: page.text,
+    sources.extend(
+        needs_scraping
+            .into_iter()
+            .zip(scraped)
+            .map(|(result, content)| match content {
+                Ok(page) => {
+                    let domain = domain_from_url(&result.url);
+                    let word_count = page.text.split_whitespace().count();
+                    ScrapedSource {
+                        url: result.url,
+                        title: result.title,
+                        query: query.to_string(),
+                        domain,
+                        word_count,
+                        raw_html_len: page.raw_html_len,
+                        link_count: page.link_count,
+                        ad_link_count: page.ad_link_count,
+                        has_headings: page.has_headings,
+                        has_lists: page.has_lists,
+                        has_code_blocks: page.has_code_blocks,
+                        paywall_detected: page.paywall_detected,
+                        content: page.text,
+                    }
                 }
-            }
-            Err(e) => {
-                warn!(%e, url = %result.url, "scrape failed, using snippet");
-                let domain = domain_from_url(&result.url);
-                let word_count = result.snippet.split_whitespace().count();
-                ScrapedSource {
-                    url: result.url,
-                    title: result.title,
-                    query: query.to_string(),
-                    domain,
-                    word_count,
-                    raw_html_len: 0,
-                    link_count: 0,
-                    ad_link_count: 0,
-                    has_headings: false,
-                    has_lists: false,
-                    has_code_blocks: false,
-                    paywall_detected: false,
-                    content: result.snippet,
+                Err(e) => {
+                    warn!(%e, url = %result.url, "scrape failed, using snippet");
+                    let domain = domain_from_url(&result.url);
+                    let word_count = result.snippet.split_whitespace().count();
+                    ScrapedSource {
+                        url: result.url,
+                        title: result.title,
+                        query: query.to_string(),
+                        domain,
+                        word_count,
+                        raw_html_len: 0,
+                        link_count: 0,
+                        ad_link_count: 0,
+                        has_headings: false,
+                        has_lists: false,
+                        has_code_blocks: false,
+                        paywall_detected: false,
+                        content: result.snippet,
+                    }
                 }
-            }
-        })
-        .collect();
+            }),
+    );
 
     Ok(sources)
 }

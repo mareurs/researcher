@@ -9,6 +9,7 @@ pub struct SearchResult {
     pub url: String,
     #[allow(dead_code)]
     pub snippet: String,
+    pub content: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,6 +65,7 @@ pub async fn search(
             title: r.title,
             url: r.url,
             snippet: r.content,
+            content: None,
         })
         .collect();
 

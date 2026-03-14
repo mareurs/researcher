@@ -111,9 +111,10 @@ async fn fetch_searxng(http: &Client, cfg: &Config, query: &str, profile: &JobPr
     let Ok(results) = search_with_fallback(
         http,
         &cfg.searxng_url,
-        &cfg.gcloud_path,
-        &cfg.vertex_project,
-        &cfg.vertex_engine_id,
+        &cfg.brave_api_key,
+        &cfg.tavily_api_key,
+        &cfg.exa_api_key,
+        None,   // job search is not profile-driven
         &full_query,
         cfg.search_results_per_query,
     ).await else { return vec![] };
