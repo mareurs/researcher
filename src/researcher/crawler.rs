@@ -77,13 +77,26 @@ pub async fn crawl_query(
     query: &str,
     visited_urls: &mut std::collections::HashSet<String>,
 ) -> Result<Vec<ScrapedSource>> {
-    // 1. Search (SearXNG with DuckDuckGo fallback)
+    // 1. Search — resolve effective domain list for native API filtering (Tavily/Exa)
+    let mut domains: Vec<String> = cfg
+        .domain_profile
+        .as_deref()
+        .and_then(|p| cfg.profiles.get(p))
+        .cloned()
+        .unwrap_or_default();
+    for d in &cfg.cli_domains {
+        if !domains.contains(d) {
+            domains.push(d.clone());
+        }
+    }
+
     let results = crate::search::search_with_fallback(
         http,
         &cfg.searxng_url,
         &cfg.brave_api_key,
         &cfg.tavily_api_key,
         &cfg.exa_api_key,
+        &domains,
         cfg.domain_profile.as_deref(),
         query,
         cfg.search_results_per_query,

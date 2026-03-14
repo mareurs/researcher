@@ -23,20 +23,26 @@ struct ExaResult {
 pub async fn search(
     http: &Client,
     api_key: &str,
+    domains: &[String],
     query: &str,
     num_results: usize,
 ) -> Result<Vec<SearchResult>> {
     debug!(%query, "Exa Search");
 
+    let mut body = serde_json::json!({
+        "query": query,
+        "numResults": num_results,
+        "type": "auto",
+        "contents": { "text": true }
+    });
+    if !domains.is_empty() {
+        body["includeDomains"] = serde_json::json!(domains);
+    }
+
     let resp = http
         .post("https://api.exa.ai/search")
         .header("x-api-key", api_key)
-        .json(&serde_json::json!({
-            "query": query,
-            "numResults": num_results,
-            "type": "auto",
-            "contents": { "text": true }
-        }))
+        .json(&body)
         .send()
         .await
         .context("Exa Search request")?;

@@ -114,6 +114,7 @@ async fn fetch_searxng(http: &Client, cfg: &Config, query: &str, profile: &JobPr
         &cfg.brave_api_key,
         &cfg.tavily_api_key,
         &cfg.exa_api_key,
+        &[],    // job search has no domain filtering
         None,   // job search is not profile-driven
         &full_query,
         cfg.search_results_per_query,
