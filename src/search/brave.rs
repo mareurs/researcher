@@ -19,6 +19,7 @@ struct WebResults {
 
 #[derive(Deserialize)]
 struct BraveResult {
+    #[serde(default)]
     title: String,
     url: String,
     #[serde(default)]
