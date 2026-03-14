@@ -100,13 +100,17 @@ pub struct Config {
     #[arg(long, env = "SEARCH_RESULTS_PER_QUERY", default_value = "8")]
     pub search_results_per_query: usize,
 
-    /// Google Custom Search API key (empty = disabled)
-    #[arg(long, env = "GOOGLE_API_KEY", default_value = "")]
-    pub google_api_key: String,
+    /// Path to gcloud binary (default "gcloud" resolves via $PATH)
+    #[arg(long, env = "GCLOUD_PATH", default_value = "gcloud")]
+    pub gcloud_path: String,
 
-    /// Google Custom Search Engine ID / cx (empty = disabled)
-    #[arg(long, env = "GOOGLE_CSE_ID", default_value = "")]
-    pub google_cse_id: String,
+    /// Vertex AI Search GCP project ID (empty = disabled)
+    #[arg(long, env = "VERTEX_PROJECT", default_value = "")]
+    pub vertex_project: String,
+
+    /// Vertex AI Search engine ID (empty = disabled)
+    #[arg(long, env = "VERTEX_ENGINE_ID", default_value = "")]
+    pub vertex_engine_id: String,
 
     // ── Embeddings / dedup ───────────────────────────────────────────────────
     /// TEI embedding service base URL (empty = disable dedup)
