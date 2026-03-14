@@ -32,7 +32,7 @@ pub async fn search(
     let mut body = serde_json::json!({
         "query": query,
         "max_results": num_results,
-        "search_depth": "basic"
+        "search_depth": "advanced"
     });
     if !domains.is_empty() {
         body["include_domains"] = serde_json::json!(domains);
