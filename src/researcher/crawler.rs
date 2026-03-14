@@ -116,7 +116,7 @@ pub async fn crawl_query(
 
     // 3. Partition: pre-extracted content (Tavily/Exa) vs needs scraping
     let (pre_extracted, needs_scraping): (Vec<_>, Vec<_>) =
-        fresh.into_iter().partition(|r| r.content.is_some());
+        fresh.into_iter().partition(|r| r.content.as_deref().is_some_and(|c| !c.is_empty()));
 
     // Build ScrapedSource for pre-extracted results — no HTTP fetch needed
     let mut sources: Vec<ScrapedSource> = pre_extracted

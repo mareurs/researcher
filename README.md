@@ -287,9 +287,9 @@ Valid stage names: `planner`, `summarizer`, `publisher`
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SEARXNG_URL` | `http://localhost:4000` | SearXNG instance URL |
-| `BRAVE_API_KEY` | Brave Search API key (empty = disabled, default fallback) |
-| `TAVILY_API_KEY` | Tavily API key — used for `news` profile (empty = disabled) |
-| `EXA_API_KEY` | Exa API key — used for `academic` profile (empty = disabled) |
+| `BRAVE_API_KEY` | `` | Brave Search API key (empty = disabled; default fallback for all profiles) |
+| `TAVILY_API_KEY` | `` | Tavily API key — used for `news` profile (empty = disabled) |
+| `EXA_API_KEY` | `` | Exa API key — used for `academic` profile (empty = disabled) |
 | `SEARCH_RESULTS_PER_QUERY` | `8` | Results fetched per sub-question |
 | `MAX_SEARCH_QUERIES` | `4` | Sub-questions the planner generates |
 | `MAX_SOURCES_PER_QUERY` | `4` | Pages scraped per query |

@@ -37,6 +37,9 @@ services:
       - LLM_FAST_STAGES=${LLM_FAST_STAGES:-planner,summarizer,publisher}
       # Search
       - SEARXNG_URL=http://searxng:8080
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - EXA_API_KEY=${EXA_API_KEY:-}
       - SEARCH_RESULTS_PER_QUERY=${SEARCH_RESULTS_PER_QUERY:-8}
       # Embeddings (TEI embed in infra stack)
       - EMBED_BASE_URL=http://tei-embed:80
