@@ -287,6 +287,9 @@ Valid stage names: `planner`, `summarizer`, `publisher`
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SEARXNG_URL` | `http://localhost:4000` | SearXNG instance URL |
+| `GCLOUD_PATH` | Path to gcloud binary (default: `gcloud`) |
+| `VERTEX_PROJECT` | GCP project ID for Vertex AI Search (empty = disabled) |
+| `VERTEX_ENGINE_ID` | Vertex AI Search engine ID (empty = disabled) |
 | `SEARCH_RESULTS_PER_QUERY` | `8` | Results fetched per sub-question |
 | `MAX_SEARCH_QUERIES` | `4` | Sub-questions the planner generates |
 | `MAX_SOURCES_PER_QUERY` | `4` | Pages scraped per query |

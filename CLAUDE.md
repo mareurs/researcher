@@ -183,6 +183,9 @@ query → planner (LLM) → [search+scrape]×N → quality filter → embed-dedu
 | `LLM_FAST_API_KEY` | `` | Fast LLM API key; empty = use `LLM_API_KEY` |
 | `LLM_FAST_MAX_TOKENS` | `4096` | Max tokens for fast LLM responses |
 | `LLM_FAST_STAGES` | `planner,summarizer,publisher` | Comma-separated pipeline stages using fast LLM (planner, summarizer, publisher) |
+| `GCLOUD_PATH` | `gcloud` | Path to gcloud binary for Vertex AI Search auth |
+| `VERTEX_PROJECT` | `` | GCP project; empty disables Vertex AI Search |
+| `VERTEX_ENGINE_ID` | `` | Vertex Search engine ID |
 | `SEARXNG_URL` | `http://localhost:4000` | SearXNG instance |
 | `SEARCH_RESULTS_PER_QUERY` | `8` | Results fetched per sub-question |
 | `EMBED_BASE_URL` | `` (disabled) | TEI URL; empty = skip dedup |

@@ -1,18 +1,20 @@
 pub mod duckduckgo;
-pub mod google;
 pub mod searxng;
+pub mod vertex;
 
 use anyhow::Result;
 use reqwest::Client;
-use searxng::SearchResult;
 use tracing::warn;
 
-/// Search with SearXNG, falling back to DuckDuckGo lite if it fails.
+pub use searxng::SearchResult;
+
+/// Search with SearXNG, falling back to Vertex AI Search then DuckDuckGo lite.
 pub async fn search_with_fallback(
     http: &Client,
     searxng_url: &str,
-    google_api_key: &str,
-    google_cse_id: &str,
+    gcloud_path: &str,
+    vertex_project: &str,
+    vertex_engine_id: &str,
     query: &str,
     num_results: usize,
 ) -> Result<Vec<SearchResult>> {
@@ -23,12 +25,12 @@ pub async fn search_with_fallback(
         Err(e) => warn!(%e, %query, "SearXNG failed"),
     }
 
-    // 2. Google Custom Search (if configured)
-    if !google_api_key.is_empty() && !google_cse_id.is_empty() {
-        match google::search(http, google_api_key, google_cse_id, query, num_results).await {
+    // 2. Vertex AI Search (if configured)
+    if !vertex_project.is_empty() && !vertex_engine_id.is_empty() {
+        match vertex::search(http, gcloud_path, vertex_project, vertex_engine_id, query, num_results).await {
             Ok(results) if !results.is_empty() => return Ok(results),
-            Ok(_) => warn!(%query, "Google CSE returned empty results, falling back to DuckDuckGo"),
-            Err(e) => warn!(%e, %query, "Google CSE failed, falling back to DuckDuckGo"),
+            Ok(_) => warn!(%query, "Vertex AI Search returned empty results, falling back to DuckDuckGo"),
+            Err(e) => warn!(%e, %query, "Vertex AI Search failed, falling back to DuckDuckGo"),
         }
     }
 

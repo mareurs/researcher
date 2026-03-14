@@ -81,8 +81,9 @@ pub async fn crawl_query(
     let results = crate::search::search_with_fallback(
         http,
         &cfg.searxng_url,
-        &cfg.google_api_key,
-        &cfg.google_cse_id,
+        &cfg.gcloud_path,
+        &cfg.vertex_project,
+        &cfg.vertex_engine_id,
         query,
         cfg.search_results_per_query,
     )
