@@ -75,7 +75,6 @@ fn expand_ticker(topic: &str) -> String {
 }
     // TODO: cache compiled regexes with std::sync::LazyLock to avoid re-compiling on every call
 
-
 fn intent_prefix(intent: Option<&str>) -> &'static str {
     match intent {
         Some("developer-docs") =>
