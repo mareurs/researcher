@@ -76,6 +76,32 @@ fn expand_ticker(topic: &str) -> String {
     // TODO: cache compiled regexes with std::sync::LazyLock to avoid re-compiling on every call
 
 
+fn intent_prefix(intent: Option<&str>) -> &'static str {
+    match intent {
+        Some("developer-docs") =>
+            "Write precise, keyword-dense queries targeting developer documentation. \
+             Use exact API names, endpoint paths, SDK method names, and version numbers \
+             where relevant. Prefer terms that match what technical doc pages actually \
+             contain (e.g. \"REST API authentication bearer token\" over \"how to log in\").\n\n",
+        Some("news") =>
+            "Write journalistic-style queries focused on recent events. \
+             Include named entities (people, organizations, products), use temporal \
+             context (e.g. \"2026\", \"latest\", \"announced\"), and prefer queries that \
+             surface news articles and press releases over evergreen content.\n\n",
+        Some("product-research") =>
+            "Write queries that surface product pages, user reviews, and comparisons. \
+             Include product names, model numbers, competitor names, and intent signals \
+             like \"review\", \"vs\", \"pricing\", \"alternatives\".\n\n",
+        Some("academic") =>
+            "Write scholarly queries using field-specific terminology. \
+             Include technical concepts, methodology names, and author or paper title \
+             fragments where relevant. Prefer queries that match abstract/paper language \
+             over general-audience explanations.\n\n",
+        _ => "",
+    }
+}
+
+
 /// Ask the LLM to decompose a research query into focused sub-questions.
 /// Returns a list of search queries to run in parallel.
 pub async fn generate_queries(
@@ -84,6 +110,7 @@ pub async fn generate_queries(
     max_queries: usize,
     domains: &[String],
     target: &crate::researcher::pipeline::ResearchTarget,
+    intent: Option<&str>,
 ) -> Result<Vec<String>> {
     let topic = &disambiguate_topic(topic);
     info!(%topic, "planning research queries");
@@ -185,7 +212,7 @@ pub async fn generate_queries(
     };
 
     let messages = vec![
-        ChatMessage::system(format!("/no_think\n{system_prompt}")),
+        ChatMessage::system(format!("/no_think\n{}{system_prompt}", intent_prefix(intent))),
         ChatMessage::user(format!(
             "Research topic: {display_topic}\n\n\
              Generate exactly {max_queries} distinct search queries to research this topic \
@@ -220,6 +247,7 @@ pub async fn broaden_queries(
     max_queries: usize,
     domains: &[String],
     target: &crate::researcher::pipeline::ResearchTarget,
+    intent: Option<&str>,
 ) -> Result<Vec<String>> {
     info!(%topic, "broadening failed queries");
 
@@ -246,8 +274,8 @@ pub async fn broaden_queries(
     };
 
     let messages = vec![
-        ChatMessage::system(
-            "/no_think\n\
+        ChatMessage::system(format!(
+            "/no_think\n{}\
              You are a research planning assistant. The current year is 2026.\n\
              Your job is to reformulate failed search queries into broader, more general alternatives \
              that are more likely to find relevant content.\n\
@@ -257,9 +285,9 @@ pub async fn broaden_queries(
                (e.g. 'DeBERTa MS MARCO' → 'transformer reranker')\n\
              - Keep the core research intent and domain\n\
              - Try different angles: tutorials, papers, implementations, comparisons\n\
-             Write queries as plain search terms only — no special operators except site: filters."
-                .to_string(),
-        ),
+             Write queries as plain search terms only — no special operators except site: filters.",
+            intent_prefix(intent),
+        )),
         ChatMessage::user(format!(
             "Research topic: {topic}\n\n\
              The following specific queries returned no relevant results:\n{failed_list}\n\n\
