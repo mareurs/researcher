@@ -275,7 +275,7 @@ pub async fn broaden_queries(
 
     let messages = vec![
         ChatMessage::system(format!(
-            "/no_think\n{}\
+            "/no_think\n\
              You are a research planning assistant. The current year is 2026.\n\
              Your job is to reformulate failed search queries into broader, more general alternatives \
              that are more likely to find relevant content.\n\
@@ -285,7 +285,8 @@ pub async fn broaden_queries(
                (e.g. 'DeBERTa MS MARCO' → 'transformer reranker')\n\
              - Keep the core research intent and domain\n\
              - Try different angles: tutorials, papers, implementations, comparisons\n\
-             Write queries as plain search terms only — no special operators except site: filters.",
+             Write queries as plain search terms only — no special operators except site: filters.\
+             {}",  // intent at end — lower priority than broadening rules
             intent_prefix(intent),
         )),
         ChatMessage::user(format!(
