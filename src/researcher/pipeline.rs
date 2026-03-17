@@ -231,7 +231,10 @@ pub async fn run(
 
     // 4. Plan
     on_progress(ProgressEvent::Planning);
-    let mut queries = generate_queries(planner_llm, topic, max_queries, &domains, &request.target).await?;
+    let mut queries = generate_queries(
+        planner_llm, topic, max_queries, &domains, &request.target,
+        request.intent.as_deref(),
+    ).await?;
     on_progress(ProgressEvent::Queries(queries.clone()));
 
     // 5. Crawl — always build eff_cfg so we can propagate domain_profile from the request.
@@ -340,7 +343,10 @@ pub async fn run(
         warn!("all summaries empty or irrelevant — retrying with broader queries");
         on_progress(ProgressEvent::RetryingWithBroaderQueries);
 
-        let broader = broaden_queries(planner_llm, topic, &queries, max_queries, &domains, &request.target).await?;
+        let broader = broaden_queries(
+            planner_llm, topic, &queries, max_queries, &domains, &request.target,
+            request.intent.as_deref(),
+        ).await?;
         queries = broader.clone();
         on_progress(ProgressEvent::Queries(broader.clone()));
 
