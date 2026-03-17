@@ -90,6 +90,8 @@ pub struct ResearchRequest {
     /// Named profile from profiles.toml (e.g. "shopping-ro")
     pub domain_profile: Option<String>,
     pub target: ResearchTarget,
+    /// Planner query style hint: developer-docs | news | product-research | academic | general
+    pub intent: Option<String>,
 }
 
 impl ResearchRequest {
@@ -101,7 +103,7 @@ impl ResearchRequest {
             domains: vec![],
             domain_profile: None,
             target: ResearchTarget::default(),
-
+            intent: None,
         }
     }
 }
