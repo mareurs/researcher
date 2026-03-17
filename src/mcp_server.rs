@@ -60,6 +60,8 @@ pub struct ResearchInput {
     #[schemars(description = "Override max sources per query (uses config default if omitted)")]
     pub max_sources: Option<usize>,
 
+    #[schemars(description = "Query intent: developer-docs | news | product-research | academic | general (default). Tunes planner query style. Orthogonal to domain_profile/domains.")]
+    pub intent: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -160,7 +162,7 @@ impl ResearcherServer {
             domains: input.domains.unwrap_or_default(),
             domain_profile: input.domain_profile,
             target: ResearchTarget::default(),
-
+            intent: input.intent.clone(),
         };
 
         match run(
@@ -196,7 +198,7 @@ impl ResearcherServer {
             domains: vec![],
             domain_profile: None,
             target: ResearchTarget::Person { method },
-
+            intent: None,
         };
 
         match run(
@@ -230,7 +232,7 @@ impl ResearcherServer {
             domains: vec![],
             domain_profile: None,
             target: ResearchTarget::Company,
-
+            intent: None,
         };
 
         match run(
@@ -394,7 +396,7 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
             domains,
             domain_profile: None,
             target,
-
+            intent: None,
         };
 
         match run(
