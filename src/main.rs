@@ -74,7 +74,7 @@ async fn run_cli(cfg: Config) -> anyhow::Result<()> {
         domains: cfg.cli_domains.clone(),
         domain_profile: cfg.domain_profile.clone(),
         target: ResearchTarget::default(),
-
+        intent: None,
     };
 
     // Token channel — print each token to stdout as it arrives

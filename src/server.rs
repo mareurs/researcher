@@ -44,7 +44,7 @@ fn into_pipeline_request(body: ResearchBody) -> crate::researcher::pipeline::Res
         domains: body.domains.unwrap_or_default(),
         domain_profile: body.domain_profile,
         target: ResearchTarget::default(),
-
+        intent: None,
     }
 }
 
