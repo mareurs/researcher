@@ -162,7 +162,7 @@ impl ResearcherServer {
             domains: input.domains.unwrap_or_default(),
             domain_profile: input.domain_profile,
             target: ResearchTarget::default(),
-            intent: input.intent.clone(),
+            intent: input.intent,
         };
 
         match run(
