@@ -423,7 +423,7 @@ impl ServerHandler for ResearcherServer {
         .with_instructions(
             "AI research agent — 6 tools:\n\
              \n\
-             • research(query, mode?, domain_profile?, domains?, max_queries?, max_sources?)\n\
+             • research(query, mode?, intent?, domain_profile?, domains?, max_queries?, max_sources?)\n\
                General web research. Modes: quick=snippets, summary=bullets, report=full markdown (default), deep=thorough.\n\
                Profiles: shopping-ro, tech-news, llm-news, academic, news, travel. Or pass domains:[\"example.com\"] to pin sites.\n\
              \n\
@@ -449,6 +449,42 @@ impl ServerHandler for ResearcherServer {
                query: ticker (BTC, NVDA, $AAPL) or topic (AI chip stocks, Ethereum staking).\n\
                asset_class: stock | crypto | macro (default: macro).\n\
                mode: quick | summary | report (default) | deep.\n\
+             \n\
+             ── When to use which params ──────────────────────────────────────\n\
+             \n\
+             mode:\n\
+               quick   → links/snippets only, no synthesis\n\
+               summary → bullet facts, fast answer\n\
+               report  → full analysis (default)\n\
+               deep    → exhaustive; 2× queries+sources; for important decisions\n\
+             \n\
+             intent (research only):\n\
+               developer-docs   → API/SDK/library docs; keyword-dense planner queries\n\
+               news             → recent events; pair with domain_profile=\"news\"\n\
+               product-research → product pages, reviews, comparisons\n\
+               academic         → papers, authors; pair with domain_profile=\"academic\"\n\
+               general          → default; broad web research\n\
+             \n\
+             domain_profile vs domains:\n\
+               Named profile → preset site list (news, academic, shopping-ro…)\n\
+               domains:[…]   → ad-hoc site pinning (vendor docs, a GitHub org)\n\
+               They union — use both together when needed\n\
+             \n\
+             ── Examples ──────────────────────────────────────────────────────\n\
+             \n\
+             research(\"LumApps REST API content retrieval\",\n\
+               intent=\"developer-docs\",\n\
+               domains=[\"lumapps.github.io\",\"developer.lumapps.com\"],\n\
+               mode=\"report\")\n\
+             \n\
+             research(\"OpenAI o3 release and benchmarks\",\n\
+               intent=\"news\", domain_profile=\"news\", mode=\"summary\")\n\
+             \n\
+             research(\"Axum 0.8 breaking changes\",\n\
+               intent=\"developer-docs\", mode=\"report\")\n\
+             \n\
+             research(\"attention mechanism transformers\",\n\
+               intent=\"academic\", domain_profile=\"academic\", mode=\"report\")\n\
              ".to_string(),
         )
     }
