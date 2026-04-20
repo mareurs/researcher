@@ -8,7 +8,8 @@ query → planner (LLM) → search+scrape×N → quality filter → dedup → re
 
 **Why Rust?** No GIL — true parallel scraping, concurrent LLM summarization, ~5MB static binary, zero LangChain.
 
-> **Recommended backend:** `gemini-2.0-flash` via the Google AI OpenAI-compatible endpoint. Local LLM stacks (llama.cpp + quantized models) work but produce noticeably weaker results — small cloud models consistently outperform local quantized models for this pipeline's multi-stage workload.
+> **Recommended backend:** `gemini-2.5-flash` via the Google AI OpenAI-compatible endpoint. Local LLM stacks (llama.cpp + quantized models) work but produce noticeably weaker results — small cloud models consistently outperform local quantized models for this pipeline's multi-stage workload.
+
 
 ## Features
 
@@ -158,7 +159,7 @@ Edit `.env`:
 
 ```env
 LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-LLM_MODEL=gemini-2.0-flash
+LLM_MODEL=gemini-2.5-flash
 LLM_API_KEY=AIzaSy...          # your Google AI Studio key
 LLM_MAX_TOKENS=8192
 STRIP_THINKING_TOKENS=false    # not needed for Gemini
@@ -218,7 +219,7 @@ cargo build --release --bin researcher-mcp
       "command": "/path/to/researcher-mcp",
       "env": {
         "LLM_BASE_URL": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "LLM_MODEL": "gemini-2.0-flash",
+        "LLM_MODEL": "gemini-2.5-flash",
         "LLM_API_KEY": "AIzaSy...",
         "LLM_MAX_TOKENS": "8192",
         "STRIP_THINKING_TOKENS": "false",
@@ -498,19 +499,20 @@ docker build -t researcher .
 | **vLLM** | `http://localhost:8000/v1` | Best for multi-user / high concurrency |
 | **LM Studio** | `http://localhost:1234/v1` | Desktop GUI for local models |
 | **OpenAI** | `https://api.openai.com/v1` | Set `LLM_API_KEY=sk-...` |
-| **Google Gemini** | `https://generativelanguage.googleapis.com/v1beta/openai/` | Set `LLM_API_KEY=AIza...`, model e.g. `gemini-2.0-flash` |
+| **Google Gemini** | `https://generativelanguage.googleapis.com/v1beta/openai/` | Set `LLM_API_KEY=AIza...`, model e.g. `gemini-2.5-flash` |
 | **Anthropic** | Use [LiteLLM](https://github.com/BerriAI/litellm) proxy | OpenAI-compatible wrapper |
 
 ## Recommended Models
 
-`gemini-2.0-flash` is the recommended model — no GPU required, free tier available, and it consistently outperforms local quantized models on this pipeline's multi-stage workload (planning, parallel summarization, report synthesis).
+`gemini-2.5-flash` is the recommended model — no GPU required, free tier available, and it consistently outperforms local quantized models on this pipeline's multi-stage workload (planning, parallel summarization, report synthesis).
 
 > **Note on local LLMs:** Running llama.cpp with quantized Qwen models works but results are noticeably weaker. The pipeline makes many concurrent LLM calls and small quantized models struggle with instruction following across all stages. Cloud models handle this much better.
 
 | Model | Backend | Notes |
 |-------|---------|-------|
-| `gemini-2.0-flash` | Google AI | **Recommended** — fast, cheap, excellent quality |
-| `gemini-2.0-flash-lite` | Google AI | Cheaper, slightly lower quality |
+| `gemini-2.5-flash` | Google AI | **Recommended** — fast, cheap, excellent quality |
+| `gemini-2.5-flash-lite` | Google AI | Cheaper, slightly lower quality |
+| `gemini-3.1-flash-lite-preview` | Google AI | Newest, preview only — may change |
 | `gpt-4.1-mini` | OpenAI | Solid cloud alternative |
 | `Qwen3.5-4B-Q4_K_M` | llama.cpp / Ollama | Local option — ~3GB VRAM, results vary |
 | `Qwen3.5-9B-Q4_K_M` | llama.cpp | Local option — ~6GB VRAM, marginal improvement |
