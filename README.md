@@ -8,6 +8,8 @@ query → planner (LLM) → search+scrape×N → quality filter → dedup → re
 
 **Why Rust?** No GIL — true parallel scraping, concurrent LLM summarization, ~5MB static binary, zero LangChain.
 
+> **Recommended backend:** `gemini-2.0-flash` via the Google AI OpenAI-compatible endpoint. Local LLM stacks (llama.cpp + quantized models) work but produce noticeably weaker results — small cloud models consistently outperform local quantized models for this pipeline's multi-stage workload.
+
 ## Features
 
 - **Multi-stage pipeline** — LLM-driven query planning, parallel web crawling, concurrent summarization, final report synthesis
@@ -142,6 +144,42 @@ LLM_API_KEY=ollama
 LLM_FAST_BASE_URL=   # empty = same model for all stages
 ```
 
+### Option E — Google Gemini Flash (recommended)
+
+No GPU required. Gemini Flash is fast, cheap, and outperforms local quantized models on this pipeline.
+
+Get a free API key at [aistudio.google.com](https://aistudio.google.com), then:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```env
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+LLM_MODEL=gemini-2.0-flash
+LLM_API_KEY=AIzaSy...          # your Google AI Studio key
+LLM_MAX_TOKENS=8192
+STRIP_THINKING_TOKENS=false    # not needed for Gemini
+
+# Fast model (same endpoint — leave blank to reuse LLM_MODEL for all stages)
+LLM_FAST_BASE_URL=
+LLM_FAST_MODEL=
+
+# SearXNG (bundled in infra stack)
+SEARXNG_URL=http://localhost:4000
+```
+
+```bash
+# Start infra (SearXNG only — no llama.cpp needed)
+make infra-up
+make up
+
+curl -X POST http://localhost:33100/research \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "What are the latest advances in fusion energy?"}'
+```
 ## MCP Server
 
 `researcher-mcp` exposes the full pipeline as MCP tools over stdio. Use with Claude Desktop, Claude Code, or any MCP client.
@@ -179,14 +217,17 @@ cargo build --release --bin researcher-mcp
     "researcher": {
       "command": "/path/to/researcher-mcp",
       "env": {
-        "LLM_BASE_URL": "http://localhost:8080/v1",
+        "LLM_BASE_URL": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "LLM_MODEL": "gemini-2.0-flash",
+        "LLM_API_KEY": "AIzaSy...",
+        "LLM_MAX_TOKENS": "8192",
+        "STRIP_THINKING_TOKENS": "false",
         "SEARXNG_URL": "http://localhost:4000"
       }
     }
   }
 }
 ```
-
 ### MCP Tools
 
 | Tool | Parameters | Description |
@@ -462,16 +503,19 @@ docker build -t researcher .
 
 ## Recommended Models
 
-`Qwen3.5-4B-Q4_K_M` is the recommended model — it runs on ~3GB VRAM and produces excellent research reports.
+`gemini-2.0-flash` is the recommended model — no GPU required, free tier available, and it consistently outperforms local quantized models on this pipeline's multi-stage workload (planning, parallel summarization, report synthesis).
 
-| Model | VRAM | Notes |
-|-------|------|-------|
-| `Qwen3.5-4B-Q4_K_M` | ~3GB | Recommended — fast, high quality |
-| `Qwen3.5-9B-Q4_K_M` | ~6GB | Larger, marginal gains for most queries |
-| `gpt-4.1-mini` | — | Cloud alternative |
+> **Note on local LLMs:** Running llama.cpp with quantized Qwen models works but results are noticeably weaker. The pipeline makes many concurrent LLM calls and small quantized models struggle with instruction following across all stages. Cloud models handle this much better.
 
-Set `STRIP_THINKING_TOKENS=true` for all Qwen3 models to strip internal `<think>` tokens from responses.
+| Model | Backend | Notes |
+|-------|---------|-------|
+| `gemini-2.0-flash` | Google AI | **Recommended** — fast, cheap, excellent quality |
+| `gemini-2.0-flash-lite` | Google AI | Cheaper, slightly lower quality |
+| `gpt-4.1-mini` | OpenAI | Solid cloud alternative |
+| `Qwen3.5-4B-Q4_K_M` | llama.cpp / Ollama | Local option — ~3GB VRAM, results vary |
+| `Qwen3.5-9B-Q4_K_M` | llama.cpp | Local option — ~6GB VRAM, marginal improvement |
 
+Set `STRIP_THINKING_TOKENS=true` when using Qwen3 models to strip internal `<think>` tokens from responses.
 ## License
 
 MIT
