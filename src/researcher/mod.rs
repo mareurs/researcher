@@ -4,3 +4,4 @@ pub mod planner;
 pub mod publisher;
 pub mod quality;
 pub mod summarizer;
+pub mod progressive;
