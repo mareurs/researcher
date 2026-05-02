@@ -36,6 +36,8 @@ use serde::Deserialize;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use config::Config;
+use crate::researcher::progressive::maybe_disclose;
+use crate::llm::client::LlmClient;
 
 
 // ── Tool input schemas ────────────────────────────────────────────────────────
@@ -62,6 +64,10 @@ pub struct ResearchInput {
 
     #[schemars(description = "Query intent: developer-docs | news | product-research | academic | general (default). Tunes planner query style. Orthogonal to domain_profile/domains.")]
     pub intent: Option<String>,
+
+    /// How to summarize when report exceeds threshold: "toc", "abstract" (default), "takeaways"
+    #[schemars(description = "Summary style when report exceeds size threshold: toc | abstract (default) | takeaways")]
+    pub summary_style: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -72,6 +78,9 @@ pub struct PersonResearchInput {
     #[schemars(description = "Research focus: 'company' (professional background), 'personal' (interests/lifestyle), or 'both' (default)")]
     pub method: Option<String>,
 
+    /// How to summarize when report exceeds threshold: "toc", "abstract" (default), "takeaways"
+    #[schemars(description = "Summary style when report exceeds size threshold: toc | abstract (default) | takeaways")]
+    pub summary_style: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -82,6 +91,9 @@ pub struct CompanyResearchInput {
     #[schemars(description = "Optional country to narrow results, e.g. 'Romania'")]
     pub country: Option<String>,
 
+    /// How to summarize when report exceeds threshold: "toc", "abstract" (default), "takeaways"
+    #[schemars(description = "Summary style when report exceeds size threshold: toc | abstract (default) | takeaways")]
+    pub summary_style: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -106,6 +118,9 @@ pub struct CodeResearchInput {
     #[schemars(description = "Optional keyword to narrow results, e.g. \"middleware timeout\" or \"CORS\". Appended to every search query.")]
     pub query: Option<String>,
 
+    /// How to summarize when report exceeds threshold: "toc", "abstract" (default), "takeaways"
+    #[schemars(description = "Summary style when report exceeds size threshold: toc | abstract (default) | takeaways")]
+    pub summary_style: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -119,6 +134,9 @@ pub struct MarketInsightInput {
     /// Output depth: "quick" | "summary" | "report" (default) | "deep"
     pub mode: Option<String>,
 
+    /// How to summarize when report exceeds threshold: "toc", "abstract" (default), "takeaways"
+    #[schemars(description = "Summary style when report exceeds size threshold: toc | abstract (default) | takeaways")]
+    pub summary_style: Option<String>,
 }
 
 // ── Server struct ─────────────────────────────────────────────────────────────
@@ -172,7 +190,17 @@ impl ResearcherServer {
             None,
         ).await
         {
-            Ok(r)  => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
+            Ok(r) => {
+                let llm = LlmClient::new(&cfg);
+                let style = input.summary_style.as_deref().unwrap_or("abstract");
+                match maybe_disclose(&llm, &request.topic, &r, style, cfg.progressive_disclosure_chars).await {
+                    Ok(d)  => d.into_string(),
+                    Err(e) => {
+                        eprintln!("[researcher] progressive disclosure failed: {e:#}");
+                        serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
+                    }
+                }
+            }
             Err(e) => format!("Error: {e:#}"),
         }
     }
@@ -193,7 +221,7 @@ impl ResearcherServer {
             .unwrap_or(PersonMethod::Both);
 
         let request = ResearchRequest {
-            topic: input.name,
+            topic: input.name.clone(),
             mode: ResearchMode::Report,
             domains: vec![],
             domain_profile: None,
@@ -207,7 +235,17 @@ impl ResearcherServer {
             |ev| eprintln!("[researcher] {ev}"),
             None,
         ).await {
-            Ok(r)  => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
+            Ok(r) => {
+                let llm = LlmClient::new(&self.cfg);
+                let style = input.summary_style.as_deref().unwrap_or("abstract");
+                match maybe_disclose(&llm, &input.name, &r, style, self.cfg.progressive_disclosure_chars).await {
+                    Ok(d)  => d.into_string(),
+                    Err(e) => {
+                        eprintln!("[researcher] progressive disclosure failed: {e:#}");
+                        serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
+                    }
+                }
+            }
             Err(e) => format!("Error: {e:#}"),
         }
     }
@@ -241,7 +279,17 @@ impl ResearcherServer {
             |ev| eprintln!("[researcher] {ev}"),
             None,
         ).await {
-            Ok(r)  => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
+            Ok(r) => {
+                let llm = LlmClient::new(&self.cfg);
+                let style = input.summary_style.as_deref().unwrap_or("abstract");
+                match maybe_disclose(&llm, &input.name, &r, style, self.cfg.progressive_disclosure_chars).await {
+                    Ok(d)  => d.into_string(),
+                    Err(e) => {
+                        eprintln!("[researcher] progressive disclosure failed: {e:#}");
+                        serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
+                    }
+                }
+            }
             Err(e) => format!("Error: {e:#}"),
         }
     }
@@ -298,7 +346,7 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
         use crate::researcher::crawler::crawl_all;
         use crate::researcher::summarizer::summarize_all;
         use crate::researcher::publisher::write_code_report;
-        use crate::llm::client::LlmClient;
+        use crate::researcher::pipeline::ResearchResult;
 
         let version = input.version.as_deref().unwrap_or("latest");
         let framework = &input.framework;
@@ -356,8 +404,22 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
         }
 
         match write_code_report(&llm, &summaries, framework, version, &aspects).await {
-            Ok(report) => report,
-            Err(e)     => format!("Error writing report: {e:#}"),
+            Ok(report) => {
+                let style = input.summary_style.as_deref().unwrap_or("abstract");
+                let result = ResearchResult {
+                    report: Some(report),
+                    sources: vec![],
+                    queries: queries.clone(),
+                };
+                match maybe_disclose(&llm, &input.framework, &result, style, self.cfg.progressive_disclosure_chars).await {
+                    Ok(d)  => d.into_string(),
+                    Err(e) => {
+                        eprintln!("[researcher] progressive disclosure failed: {e:#}");
+                        result.report.unwrap_or_default()
+                    }
+                }
+            }
+            Err(e) => format!("Error writing report: {e:#}"),
         }
     }
 
@@ -391,7 +453,7 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
         let domains = crate::researcher::pipeline::domains_for_target(&target);
 
         let request = ResearchRequest {
-            topic: input.query,
+            topic: input.query.clone(),
             mode,
             domains,
             domain_profile: None,
@@ -405,7 +467,17 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
             |ev| eprintln!("[researcher] {ev}"),
             None,
         ).await {
-            Ok(r)  => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
+            Ok(r) => {
+                let llm = LlmClient::new(&self.cfg);
+                let style = input.summary_style.as_deref().unwrap_or("abstract");
+                match maybe_disclose(&llm, &input.query, &r, style, self.cfg.progressive_disclosure_chars).await {
+                    Ok(d)  => d.into_string(),
+                    Err(e) => {
+                        eprintln!("[researcher] progressive disclosure failed: {e:#}");
+                        serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
+                    }
+                }
+            }
             Err(e) => format!("Error: {e:#}"),
         }
     }
@@ -485,6 +557,17 @@ impl ServerHandler for ResearcherServer {
              \n\
              research(\"attention mechanism transformers\",\n\
                intent=\"academic\", domain_profile=\"academic\", mode=\"report\")\n\
+             \n\n\
+             ## Progressive Disclosure\n\
+             When a report exceeds PROGRESSIVE_DISCLOSURE_CHARS (default: 4000 chars), the full report\n\
+             is saved to ~/.local/share/researcher/<timestamp>-<slug>.md and a compact envelope is returned:\n\
+               { summary, toc, path, word_count, hint }\n\
+             Read the full report at 'path' with a standard file-reading tool.\n\n\
+             summary_style param (optional, all research tools except search_jobs):\n\
+               \"abstract\"  — 3-5 sentence LLM abstract + TOC + path (default)\n\
+               \"toc\"       — headings only + path, no LLM call (cheapest)\n\
+               \"takeaways\" — 5-8 bullet key findings + TOC + path\n\n\
+             Set PROGRESSIVE_DISCLOSURE_CHARS=0 to always return inline.\
              ".to_string(),
         )
     }
