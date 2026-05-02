@@ -71,70 +71,70 @@ pub struct ResearchInput {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct PersonResearchInput {
-    #[schemars(description = "Full name of the person to research, e.g. 'Maria Ionescu'")]
+    #[schemars(description = "Full name of the person to research")]
     pub name: String,
 
-    #[schemars(description = "Research focus: 'company' (professional background), 'personal' (interests/lifestyle), or 'both' (default)")]
+    #[schemars(description = "company|personal|both(default)")]
     pub method: Option<String>,
 
-    /// How to summarize when report exceeds threshold: "toc", "abstract" (default), "takeaways"
-    #[schemars(description = "Summary style when report exceeds size threshold: toc | abstract (default) | takeaways")]
+    #[schemars(description = "toc|abstract(default)|takeaways")]
     pub summary_style: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CompanyResearchInput {
-    #[schemars(description = "Company name to research, e.g. 'Acme Corp'")]
+    #[schemars(description = "Company name to research")]
     pub name: String,
 
-    #[schemars(description = "Optional country to narrow results, e.g. 'Romania'")]
+    #[schemars(description = "optional country to narrow results")]
     pub country: Option<String>,
 
-    /// How to summarize when report exceeds threshold: "toc", "abstract" (default), "takeaways"
-    #[schemars(description = "Summary style when report exceeds size threshold: toc | abstract (default) | takeaways")]
+    #[schemars(description = "toc|abstract(default)|takeaways")]
     pub summary_style: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct JobSearchInput {
-    #[schemars(description = "Job search query, e.g. 'LLM inference engineer' or 'AI research Rust'")]
+    #[schemars(description = "Job search query, e.g. 'LLM inference engineer'")]
     pub query: String,
 
-    #[schemars(description = "Output mode: 'list' (ranked shortlist, default) or 'deep' (shortlist + company briefs for top 5)")]
+    #[schemars(description = "list=shortlist(default)|deep=company briefs on top 5")]
     pub mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CodeResearchInput {
-    #[schemars(description = "Framework or library to research, e.g. \"axum\", \"tokio\", \"claude code\"")]
+    #[schemars(description = "Framework or library to research")]
     pub framework: String,
-    #[schemars(description = "Version to target, e.g. \"0.8\". Defaults to \"latest\" if omitted.")]
+
+    #[schemars(description = "version to target, e.g. \"0.8\"")]
     pub version: Option<String>,
-    #[schemars(description = "Aspects to research: bugs, changelog, community, releases. Defaults to [\"bugs\", \"changelog\", \"community\"] if omitted.")]
+
+    #[schemars(description = "bugs|changelog|community|releases")]
     pub aspects: Option<Vec<String>>,
-    #[schemars(description = "GitHub repo slug, e.g. \"tokio-rs/tokio\". Anchors bug/release queries to GitHub.")]
+
+    #[schemars(description = "GitHub slug e.g. tokio-rs/axum")]
     pub repo: Option<String>,
-    #[schemars(description = "Optional keyword to narrow results, e.g. \"middleware timeout\" or \"CORS\". Appended to every search query.")]
+
+    #[schemars(description = "keyword to narrow results")]
     pub query: Option<String>,
 
-    /// How to summarize when report exceeds threshold: "toc", "abstract" (default), "takeaways"
-    #[schemars(description = "Summary style when report exceeds size threshold: toc | abstract (default) | takeaways")]
+    #[schemars(description = "toc|abstract(default)|takeaways")]
     pub summary_style: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct MarketInsightInput {
-    /// Ticker symbol (e.g. "BTC", "NVDA", "$AAPL") or free-form topic
-    /// (e.g. "AI chip stocks", "Ethereum staking post-Shanghai")
+    #[schemars(description = "ticker (BTC, NVDA) or topic (AI chip stocks)")]
     pub query: String,
-    /// Asset class for domain and prompt selection.
-    /// "stock" | "crypto" | "macro" (default: "macro")
+
+    #[schemars(description = "stock|crypto|macro(default)")]
     pub asset_class: Option<String>,
-    /// Output depth: "quick" | "summary" | "report" (default) | "deep"
+
+    #[schemars(description = "quick|summary|report(default)|deep")]
     pub mode: Option<String>,
 
-    /// How to summarize when report exceeds threshold: "toc", "abstract" (default), "takeaways"
-    #[schemars(description = "Summary style when report exceeds size threshold: toc | abstract (default) | takeaways")]
+    #[schemars(description = "toc|abstract(default)|takeaways")]
     pub summary_style: Option<String>,
 }
 
