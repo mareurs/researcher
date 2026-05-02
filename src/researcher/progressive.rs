@@ -129,6 +129,9 @@ pub async fn maybe_disclose(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn extract_toc_returns_h2_headings() {
@@ -154,6 +157,7 @@ mod tests {
 
     #[test]
     fn write_to_disk_creates_file() {
+        let _guard = WRITE_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("HOME", dir.path());
         let path = write_to_disk("test topic", "# Report\n\nContent here.").unwrap();
@@ -166,6 +170,7 @@ mod tests {
 
     #[test]
     fn write_to_disk_slug_strips_specials() {
+        let _guard = WRITE_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("HOME", dir.path());
         let path = write_to_disk("Rust async/await: deep dive!", "content").unwrap();

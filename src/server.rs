@@ -92,7 +92,7 @@ async fn research_json(
     let result = run(&cfg, &request, |_| {}, None).await;
     match result {
         Ok(r) => {
-            let llm = LlmClient::new(&*cfg);
+            let llm = LlmClient::new(&cfg);
             match maybe_disclose(&llm, &request.topic, &r, &summary_style, cfg.progressive_disclosure_chars).await {
                 Ok(d) => (
                     [(axum::http::header::CONTENT_TYPE, "application/json")],
