@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use anyhow::Result;
 use chrono::Local;
-use crate::llm::client::LlmClient;
+use crate::llm::client::{ChatMessage, LlmClient};
 use crate::researcher::pipeline::ResearchResult;
 
 #[derive(Debug, serde::Serialize)]
@@ -59,7 +59,26 @@ pub fn write_to_disk(topic: &str, report: &str) -> Result<PathBuf> {
 }
 
 pub async fn generate_summary(llm: &LlmClient, report: &str, style: &str) -> Result<String> {
-    todo!()
+    if style == "toc" {
+        return Ok(extract_toc(report).join("\n"));
+    }
+
+    let prompt = match style {
+        "takeaways" => format!(
+            "Extract the 5-8 most important findings from this research report as a concise bullet list. \
+             Each bullet should be one specific fact, number, or conclusion. No introduction or headers.\n\n{report}"
+        ),
+        _ => format!(
+            "Write a 3-5 sentence abstract summarizing the key findings of this research report. \
+             Be specific — include key facts, numbers, and conclusions. No headers.\n\n{report}"
+        ),
+    };
+
+    let messages = vec![
+        ChatMessage::system("You are a research analyst. Summarize research reports concisely and accurately."),
+        ChatMessage::user(prompt),
+    ];
+    llm.complete(messages).await
 }
 
 pub async fn maybe_disclose(
@@ -69,7 +88,42 @@ pub async fn maybe_disclose(
     summary_style: &str,
     threshold: usize,
 ) -> Result<MaybeDisclosed> {
-    todo!()
+    let report = match &result.report {
+        Some(r) => r,
+        None => {
+            return Ok(MaybeDisclosed::Inline(serde_json::to_string_pretty(result)?));
+        }
+    };
+
+    if threshold > 0 && report.len() <= threshold {
+        return Ok(MaybeDisclosed::Inline(serde_json::to_string_pretty(result)?));
+    }
+
+    let path = match write_to_disk(topic, report) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("progressive disclosure: disk write failed ({e:#}), returning inline");
+            return Ok(MaybeDisclosed::Inline(serde_json::to_string_pretty(result)?));
+        }
+    };
+
+    let summary = match generate_summary(llm, report, summary_style).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("progressive disclosure: summary failed ({e:#}), using toc");
+            extract_toc(report).join("\n")
+        }
+    };
+
+    let envelope = ProgressiveEnvelope {
+        toc: extract_toc(report),
+        word_count: report.split_whitespace().count(),
+        path: path.to_string_lossy().into_owned(),
+        summary,
+        hint: "Full report saved to disk. Read the file at 'path' using a file-reading tool, or read specific sections by heading.",
+    };
+
+    Ok(MaybeDisclosed::Progressive(serde_json::to_string_pretty(&envelope)?))
 }
 
 #[cfg(test)]
