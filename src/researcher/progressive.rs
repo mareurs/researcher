@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use anyhow::Result;
 use chrono::Local;
-use crate::llm::client::{ChatMessage, LlmClient};
+use crate::llm::client::LlmClient;
 use crate::researcher::pipeline::ResearchResult;
 
 #[derive(Debug, serde::Serialize)]
@@ -48,7 +48,8 @@ pub fn write_to_disk(topic: &str, report: &str) -> Result<PathBuf> {
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("-");
-    let slug: String = slug.chars().take(40).collect();
+    let slug: String = slug.chars().take(40).collect::<String>();
+    let slug = slug.trim_matches('-');
 
     let ts = Local::now().format("%Y-%m-%dT%H-%M-%S");
     let filename = format!("{ts}-{slug}.md");
