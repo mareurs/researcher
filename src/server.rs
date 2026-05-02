@@ -29,6 +29,8 @@ pub struct ResearchBody {
     pub domains: Option<Vec<String>>,
     #[serde(default)]
     pub intent: Option<String>,
+    #[serde(default)]
+    pub summary_style: Option<String>,
 }
 
 fn into_pipeline_request(body: ResearchBody) -> crate::researcher::pipeline::ResearchRequest {
@@ -82,14 +84,30 @@ async fn research_json(
     State(cfg): State<AppState>,
     Json(req): Json<ResearchBody>,
 ) -> Response {
+    use crate::researcher::progressive::maybe_disclose;
+    use crate::llm::client::LlmClient;
+
+    let summary_style = req.summary_style.clone().unwrap_or_else(|| "abstract".to_string());
     let request = into_pipeline_request(req);
     let result = run(&cfg, &request, |_| {}, None).await;
     match result {
-        Ok(r) => Json(serde_json::json!({
-            "report": r.report,
-            "sources": r.sources,
-            "queries": r.queries,
-        })).into_response(),
+        Ok(r) => {
+            let llm = LlmClient::new(&*cfg);
+            match maybe_disclose(&llm, &request.topic, &r, &summary_style, cfg.progressive_disclosure_chars).await {
+                Ok(d) => (
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    d.into_string(),
+                ).into_response(),
+                Err(e) => {
+                    tracing::warn!("progressive disclosure failed: {e:#}");
+                    Json(serde_json::json!({
+                        "report": r.report,
+                        "sources": r.sources,
+                        "queries": r.queries,
+                    })).into_response()
+                }
+            }
+        }
         Err(e) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             e.to_string(),
