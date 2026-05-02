@@ -155,7 +155,7 @@ impl ResearcherServer {
         }
     }
 
-    #[tool(description = "Web research agent.\nModes: quick=links+snippets, summary=bullet facts, report=full markdown (default), deep=thorough.\nProfiles: shopping-ro, tech-news, llm-news, academic, news, travel. Or pass domains:[\"site\"] directly.")]
+    #[tool(description = "Web research agent.")]
     async fn research(
         &self,
         Parameters(input): Parameters<ResearchInput>,
@@ -204,7 +204,7 @@ impl ResearcherServer {
         }
     }
 
-    #[tool(description = "Research a person for meeting prep. Returns a markdown brief covering professional background, career, public voice, conversation hooks, and/or personal interests depending on 'method'. Sources: LinkedIn, Twitter/X, GitHub, Facebook, Instagram, Reddit, and more.")]
+    #[tool(description = "Meeting prep brief on a person.")]
     async fn research_person(
         &self,
         Parameters(input): Parameters<PersonResearchInput>,
@@ -249,7 +249,7 @@ impl ResearcherServer {
         }
     }
 
-    #[tool(description = "Research a company for meeting prep. Returns a markdown brief covering what they do, size & stage, recent news, culture, and strategic context. Sources: LinkedIn, Crunchbase, Bloomberg, Glassdoor, Trustpilot, Wikipedia, and news.")]
+    #[tool(description = "Meeting prep brief on a company.")]
     async fn research_company(
         &self,
         Parameters(input): Parameters<CompanyResearchInput>,
@@ -293,7 +293,7 @@ impl ResearcherServer {
         }
     }
 
-    #[tool(description = "Search for remote AI engineering jobs matching your profile in profiles.toml [job-profile]. Returns a ranked markdown report. mode='list' for a quick shortlist (default), mode='deep' for full inline company briefs on top 5 matches. Sources: Remotive, Adzuna (if ADZUNA_APP_ID/KEY set), SearXNG.")]
+    #[tool(description = "Find remote AI engineering jobs matching profiles.toml [job-profile].")]
     async fn search_jobs(
         &self,
         Parameters(input): Parameters<JobSearchInput>,
@@ -331,13 +331,7 @@ impl ResearcherServer {
     }
 
 
-    #[tool(description = "Research a framework or library: known bugs, changelogs, breaking changes, \
-releases, and community sentiment. \
-aspects: bugs, changelog, community, releases — pass one or more (default: bugs+changelog+community). \
-query: optional keyword to narrow results, e.g. \"middleware timeout\" or \"CORS\". \
-repo: GitHub slug e.g. 'tokio-rs/tokio' — anchors bug/release queries to GitHub issues/releases. \
-version: e.g. '0.8' — defaults to 'latest'. \
-Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
+    #[tool(description = "Research a library/framework: bugs, changelogs, breaking changes, community sentiment.")]
     async fn research_code(
         &self,
         Parameters(input): Parameters<CodeResearchInput>,
@@ -422,10 +416,7 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
         }
     }
 
-    #[tool(description = "Market insight research: stocks, crypto, and macro. \
-        query: ticker (BTC, NVDA) or topic (AI chip stocks). \
-        asset_class: stock | crypto | macro (default: macro). \
-        mode: quick | summary | report (default) | deep.")]
+    #[tool(description = "Market insight research: stocks, crypto, and macro. Web research only — no price APIs.")]
     async fn market_insight(
         &self,
         Parameters(input): Parameters<MarketInsightInput>,
