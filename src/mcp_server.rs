@@ -47,26 +47,25 @@ pub struct ResearchInput {
     #[schemars(description = "Research topic or question")]
     pub query: String,
 
-    #[schemars(description = "Output mode: quick (links+snippets only), summary (bullet facts), report (full markdown, default), deep (thorough long-form)")]
+    #[schemars(description = "quick|summary|report(default)|deep")]
     pub mode: Option<String>,
 
-    #[schemars(description = "Named domain profile: shopping-ro, tech-news, llm-news, academic, news, travel")]
+    #[schemars(description = "named preset: shopping-ro,tech-news,llm-news,academic,news,travel")]
     pub domain_profile: Option<String>,
 
-    #[schemars(description = "Raw domain list override, e.g. [\"olx.ro\", \"reddit.com/r/LocalLLaMA\"]")]
+    #[schemars(description = "ad-hoc site list; unions with domain_profile")]
     pub domains: Option<Vec<String>>,
 
-    #[schemars(description = "Override max search sub-queries (uses config default if omitted)")]
+    #[schemars(description = "override config default")]
     pub max_queries: Option<usize>,
 
-    #[schemars(description = "Override max sources per query (uses config default if omitted)")]
+    #[schemars(description = "override config default")]
     pub max_sources: Option<usize>,
 
-    #[schemars(description = "Query intent: developer-docs | news | product-research | academic | general (default). Tunes planner query style. Orthogonal to domain_profile/domains.")]
+    #[schemars(description = "developer-docs|news|product-research|academic|general(default)")]
     pub intent: Option<String>,
 
-    /// How to summarize when report exceeds threshold: "toc", "abstract" (default), "takeaways"
-    #[schemars(description = "Summary style when report exceeds size threshold: toc | abstract (default) | takeaways")]
+    #[schemars(description = "toc|abstract(default)|takeaways")]
     pub summary_style: Option<String>,
 }
 
