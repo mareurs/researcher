@@ -193,6 +193,11 @@ pub struct Config {
     /// Job search profile loaded from profiles.toml [job-profile]. Not a CLI flag.
     #[clap(skip)]
     pub job_profile: Option<JobProfile>,
+
+    /// Char length above which MCP tools save the report to disk and return a compact envelope.
+    /// Set to 0 to always return inline (disables feature).
+    #[arg(long, env = "PROGRESSIVE_DISCLOSURE_CHARS", default_value = "4000")]
+    pub progressive_disclosure_chars: usize,
 }
 
 /// User profile for job search, loaded from the `[job-profile]` section of `profiles.toml`.
