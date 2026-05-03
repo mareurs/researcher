@@ -41,6 +41,37 @@ use crate::llm::client::LlmClient;
 
 // ── Tool input schemas ────────────────────────────────────────────────────────
 
+/// Accepts JSON number or JSON string for `Option<usize>` fields.
+/// LLM tool-callers often emit numeric params as strings ("1" instead of 1).
+fn deser_opt_usize<'de, D>(d: D) -> Result<Option<usize>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Unexpected, Visitor};
+    struct V;
+    impl<'de> Visitor<'de> for V {
+        type Value = Option<usize>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(f, "a non-negative integer or string representing one")
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> { Ok(Some(v as usize)) }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            if v < 0 { Err(de::Error::invalid_value(Unexpected::Signed(v), &self)) }
+            else { Ok(Some(v as usize)) }
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            v.parse::<usize>().map(Some).map_err(|_| de::Error::invalid_value(Unexpected::Str(v), &self))
+        }
+        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> { Ok(None) }
+        fn visit_some<D2: serde::Deserializer<'de>>(self, d: D2) -> Result<Self::Value, D2::Error> {
+            d.deserialize_any(V)
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> { Ok(None) }
+    }
+    d.deserialize_option(V)
+}
+
+
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ResearchInput {
     #[schemars(description = "Research subject or question. For target=code, this is the framework/library name.")]
@@ -62,9 +93,11 @@ pub struct ResearchInput {
     pub domains: Option<Vec<String>>,
 
     #[schemars(description = "max sub-questions for planner (topic/market only)")]
+    #[serde(default, deserialize_with = "deser_opt_usize")]
     pub max_queries: Option<usize>,
 
     #[schemars(description = "max sources scraped per query (topic/market only)")]
+    #[serde(default, deserialize_with = "deser_opt_usize")]
     pub max_sources: Option<usize>,
 
     #[schemars(description = "developer-docs|news|product-research|academic|general(default)")]
