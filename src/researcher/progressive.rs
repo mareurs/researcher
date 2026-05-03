@@ -95,7 +95,7 @@ pub async fn maybe_disclose(
         }
     };
 
-    if threshold > 0 && report.len() <= threshold {
+    if threshold == 0 || report.len() <= threshold {
         return Ok(MaybeDisclosed::Inline(serde_json::to_string_pretty(result)?));
     }
 
