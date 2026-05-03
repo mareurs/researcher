@@ -32,7 +32,6 @@ use rmcp::{
     transport::stdio,
     ServiceExt,
 };
-use serde::Deserialize;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use config::Config;
@@ -44,99 +43,59 @@ use crate::llm::client::LlmClient;
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ResearchInput {
-    #[schemars(description = "Research topic or question")]
+    #[schemars(description = "Research subject or question. For target=code, this is the framework/library name.")]
     pub query: String,
+
+    #[schemars(description = "topic(default)|person|company|market|code|jobs")]
+    pub target: Option<String>,
 
     #[schemars(description = "quick|summary|report(default)|deep")]
     pub mode: Option<String>,
 
+    #[schemars(description = "toc|abstract(default)|takeaways")]
+    pub summary_style: Option<String>,
+
     #[schemars(description = "named preset: shopping-ro,tech-news,llm-news,academic,news,travel")]
     pub domain_profile: Option<String>,
 
-    #[schemars(description = "ad-hoc site list; unions with domain_profile")]
+    #[schemars(description = "ad-hoc domain filter list; unions with domain_profile")]
     pub domains: Option<Vec<String>>,
 
-    #[schemars(description = "override config default")]
+    #[schemars(description = "max sub-questions for planner (topic/market only)")]
     pub max_queries: Option<usize>,
 
-    #[schemars(description = "override config default")]
+    #[schemars(description = "max sources scraped per query (topic/market only)")]
     pub max_sources: Option<usize>,
 
     #[schemars(description = "developer-docs|news|product-research|academic|general(default)")]
     pub intent: Option<String>,
 
-    #[schemars(description = "toc|abstract(default)|takeaways")]
-    pub summary_style: Option<String>,
-}
+    #[schemars(description = "[person] company|personal|both(default)")]
+    pub person_method: Option<String>,
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PersonResearchInput {
-    #[schemars(description = "Full name of the person to research")]
-    pub name: String,
-
-    #[schemars(description = "company|personal|both(default)")]
-    pub method: Option<String>,
-
-    #[schemars(description = "toc|abstract(default)|takeaways")]
-    pub summary_style: Option<String>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CompanyResearchInput {
-    #[schemars(description = "Company name to research")]
-    pub name: String,
-
-    #[schemars(description = "optional country to narrow results")]
+    #[schemars(description = "[company] country to disambiguate company name")]
     pub country: Option<String>,
 
-    #[schemars(description = "toc|abstract(default)|takeaways")]
-    pub summary_style: Option<String>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct JobSearchInput {
-    #[schemars(description = "Job search query, e.g. 'LLM inference engineer'")]
-    pub query: String,
-
-    #[schemars(description = "list=shortlist(default)|deep=company briefs on top 5")]
-    pub mode: Option<String>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CodeResearchInput {
-    #[schemars(description = "Framework or library to research")]
-    pub framework: String,
-
-    #[schemars(description = "version to target, e.g. \"0.8\"")]
-    pub version: Option<String>,
-
-    #[schemars(description = "bugs|changelog|community|releases")]
-    pub aspects: Option<Vec<String>>,
-
-    #[schemars(description = "GitHub slug e.g. tokio-rs/axum")]
-    pub repo: Option<String>,
-
-    #[schemars(description = "keyword to narrow results")]
-    pub query: Option<String>,
-
-    #[schemars(description = "toc|abstract(default)|takeaways")]
-    pub summary_style: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct MarketInsightInput {
-    #[schemars(description = "ticker (BTC, NVDA) or topic (AI chip stocks)")]
-    pub query: String,
-
-    #[schemars(description = "stock|crypto|macro(default)")]
+    #[schemars(description = "[market] stock|crypto|macro(default)")]
     pub asset_class: Option<String>,
 
-    #[schemars(description = "quick|summary|report(default)|deep")]
-    pub mode: Option<String>,
+    #[schemars(description = "[code] version or 'latest'")]
+    pub version: Option<String>,
 
-    #[schemars(description = "toc|abstract(default)|takeaways")]
-    pub summary_style: Option<String>,
+    #[schemars(description = "[code] bugs|changelog|community|releases (default: bugs,changelog,community)")]
+    pub aspects: Option<Vec<String>>,
+
+    #[schemars(description = "[code] GitHub owner/repo for targeted issue/release search")]
+    pub repo: Option<String>,
+
+    #[schemars(description = "[code] keyword to narrow search within the framework")]
+    pub keywords: Option<String>,
 }
+
+
+
+
+
 
 // ── Server struct ─────────────────────────────────────────────────────────────
 
@@ -155,323 +114,295 @@ impl ResearcherServer {
         }
     }
 
-    #[tool(description = "Web research agent.")]
+    #[tool(description = "Research any topic, person, company, market, codebase, or jobs.")]
     async fn research(
         &self,
         Parameters(input): Parameters<ResearchInput>,
     ) -> String {
-        use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest, ResearchTarget};
-
-        let mode = match input.mode.as_deref().unwrap_or("report") {
-            "quick"   => ResearchMode::Quick,
-            "summary" => ResearchMode::Summary,
-            "deep"    => ResearchMode::Deep,
-            _         => ResearchMode::Report,
-        };
-
-        let mut cfg = (*self.cfg).clone();
-        if let Some(mq) = input.max_queries   { cfg.max_search_queries    = mq; }
-        if let Some(ms) = input.max_sources   { cfg.max_sources_per_query = ms; }
-
-        let request = ResearchRequest {
-            topic: input.query,
-            mode,
-            domains: input.domains.unwrap_or_default(),
-            domain_profile: input.domain_profile,
-            target: ResearchTarget::default(),
-            intent: input.intent,
-        };
-
-        match run(
-            &cfg,
-            &request,
-            |ev| eprintln!("[researcher] {ev}"),
-            None,
-        ).await
-        {
-            Ok(r) => {
-                let llm = LlmClient::new(&cfg);
-                let style = input.summary_style.as_deref().unwrap_or("abstract");
-                match maybe_disclose(&llm, &request.topic, &r, style, cfg.progressive_disclosure_chars).await {
-                    Ok(d)  => d.into_string(),
-                    Err(e) => {
-                        eprintln!("[researcher] progressive disclosure failed: {e:#}");
-                        serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
-                    }
-                }
-            }
-            Err(e) => format!("Error: {e:#}"),
-        }
-    }
-
-    #[tool(description = "Meeting prep brief on a person.")]
-    async fn research_person(
-        &self,
-        Parameters(input): Parameters<PersonResearchInput>,
-    ) -> String {
-        use crate::researcher::pipeline::{
-            run, ResearchMode, ResearchRequest, ResearchTarget, PersonMethod,
-        };
-
-        let method: PersonMethod = input.method
-            .as_deref()
-            .unwrap_or("both")
-            .parse()
-            .unwrap_or(PersonMethod::Both);
-
-        let request = ResearchRequest {
-            topic: input.name.clone(),
-            mode: ResearchMode::Report,
-            domains: vec![],
-            domain_profile: None,
-            target: ResearchTarget::Person { method },
-            intent: None,
-        };
-
-        match run(
-            &self.cfg,
-            &request,
-            |ev| eprintln!("[researcher] {ev}"),
-            None,
-        ).await {
-            Ok(r) => {
-                let llm = LlmClient::new(&self.cfg);
-                let style = input.summary_style.as_deref().unwrap_or("abstract");
-                match maybe_disclose(&llm, &input.name, &r, style, self.cfg.progressive_disclosure_chars).await {
-                    Ok(d)  => d.into_string(),
-                    Err(e) => {
-                        eprintln!("[researcher] progressive disclosure failed: {e:#}");
-                        serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
-                    }
-                }
-            }
-            Err(e) => format!("Error: {e:#}"),
-        }
-    }
-
-    #[tool(description = "Meeting prep brief on a company.")]
-    async fn research_company(
-        &self,
-        Parameters(input): Parameters<CompanyResearchInput>,
-    ) -> String {
-        use crate::researcher::pipeline::{
-            run, ResearchMode, ResearchRequest, ResearchTarget,
-        };
-
-        let topic = match &input.country {
-            Some(c) => format!("{} {}", input.name, c),
-            None    => input.name.clone(),
-        };
-
-        let request = ResearchRequest {
-            topic,
-            mode: ResearchMode::Report,
-            domains: vec![],
-            domain_profile: None,
-            target: ResearchTarget::Company,
-            intent: None,
-        };
-
-        match run(
-            &self.cfg,
-            &request,
-            |ev| eprintln!("[researcher] {ev}"),
-            None,
-        ).await {
-            Ok(r) => {
-                let llm = LlmClient::new(&self.cfg);
-                let style = input.summary_style.as_deref().unwrap_or("abstract");
-                match maybe_disclose(&llm, &input.name, &r, style, self.cfg.progressive_disclosure_chars).await {
-                    Ok(d)  => d.into_string(),
-                    Err(e) => {
-                        eprintln!("[researcher] progressive disclosure failed: {e:#}");
-                        serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
-                    }
-                }
-            }
-            Err(e) => format!("Error: {e:#}"),
-        }
-    }
-
-    #[tool(description = "Find remote AI engineering jobs matching profiles.toml [job-profile].")]
-    async fn search_jobs(
-        &self,
-        Parameters(input): Parameters<JobSearchInput>,
-    ) -> String {
-        use crate::jobs::fetcher::fetch_jobs;
-        use crate::jobs::scorer::score_listings;
-        use crate::jobs::publisher::write_job_report;
-        use crate::llm::client::LlmClient;
-
-        let profile = match &self.cfg.job_profile {
-            Some(p) => p.clone(),
-            None => return "Error: no [job-profile] section found in profiles.toml. \
-                            Add one to enable job search.".to_string(),
-        };
-
-        let deep = input.mode.as_deref() == Some("deep");
-
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .unwrap();
-        let llm = LlmClient::new(&self.cfg);
-
-        let listings = fetch_jobs(&http, &self.cfg, &input.query, &profile).await;
-
-        let scored = match score_listings(&llm, &listings, &profile, 6).await {
-            Ok(s) => s,
-            Err(e) => return format!("Error scoring listings: {e:#}"),
-        };
-
-        match write_job_report(&self.cfg, &scored, &input.query, deep).await {
-            Ok(report) => report,
-            Err(e) => format!("Error writing report: {e:#}"),
+        match input.target.as_deref().unwrap_or("topic") {
+            "person"  => dispatch_person(self.cfg.clone(), input).await,
+            "company" => dispatch_company(self.cfg.clone(), input).await,
+            "market"  => dispatch_market(self.cfg.clone(), input).await,
+            "code"    => dispatch_code(self.cfg.clone(), input).await,
+            "jobs"    => dispatch_jobs(self.cfg.clone(), input).await,
+            _         => dispatch_topic(self.cfg.clone(), input).await,
         }
     }
 
 
-    #[tool(description = "Research a library/framework: bugs, changelogs, breaking changes, community sentiment.")]
-    async fn research_code(
-        &self,
-        Parameters(input): Parameters<CodeResearchInput>,
-    ) -> String {
-        use crate::researcher::crawler::crawl_all;
-        use crate::researcher::summarizer::summarize_all;
-        use crate::researcher::publisher::write_code_report;
-        use crate::researcher::pipeline::ResearchResult;
 
-        let version = input.version.as_deref().unwrap_or("latest");
-        let framework = &input.framework;
-        let aspects = input.aspects.unwrap_or_else(|| {
-            vec!["bugs".to_string(), "changelog".to_string(), "community".to_string()]
-        });
 
-        // Optional keyword narrows every query (e.g. "middleware timeout")
-        let q = input.query.as_deref().unwrap_or("").trim().to_string();
-        let q_suffix = if q.is_empty() { String::new() } else { format!(" {q}") };
 
-        // Build query list from templates — no LLM planner call
-        let mut queries: Vec<String> = Vec::new();
-        for aspect in &aspects {
-            match aspect.as_str() {
-                "bugs" => {
-                    queries.push(format!("{framework} {version}{q_suffix} bug issue"));
-                    if let Some(repo) = &input.repo {
-                        queries.push(format!("{framework} {version}{q_suffix} issue site:github.com/{repo}/issues"));
-                    }
-                }
-                "changelog" => {
-                    queries.push(format!("{framework} {version}{q_suffix} changelog release notes"));
-                    queries.push(format!("{framework} {version}{q_suffix} breaking changes"));
-                }
-                "community" => {
-                    queries.push(format!("{framework} {version}{q_suffix} site:reddit.com"));
-                    queries.push(format!("{framework} {version}{q_suffix} site:news.ycombinator.com"));
-                }
-                "releases" => {
-                    queries.push(format!("{framework} {version}{q_suffix} release"));
-                    if let Some(repo) = &input.repo {
-                        queries.push(format!("{framework} {version}{q_suffix} site:github.com/{repo}/releases"));
-                    }
-                }
-                _ => {} // silently skip unknown aspects
-            }
-        }
 
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .unwrap();
-        let llm = LlmClient::new(&self.cfg);
-        let topic = format!("{framework} {version}{q_suffix}");
 
-        let sources = crawl_all(&http, &self.cfg, &queries).await;
-        if sources.is_empty() {
-            return format!("Error: no sources found for {framework} {version}{q_suffix}");
-        }
+}
 
-        let summaries = summarize_all(&llm, &sources, &topic).await;
-        if summaries.is_empty() {
-            return format!("Error: could not summarize sources for {framework} {version}{q_suffix}");
-        }
+async fn dispatch_topic(cfg: std::sync::Arc<Config>, input: ResearchInput) -> String {
+    use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest, ResearchTarget};
 
-        match write_code_report(&llm, &summaries, framework, version, &aspects).await {
-            Ok(report) => {
-                let style = input.summary_style.as_deref().unwrap_or("abstract");
-                let result = ResearchResult {
-                    report: Some(report),
-                    sources: vec![],
-                    queries: queries.clone(),
-                };
-                match maybe_disclose(&llm, &input.framework, &result, style, self.cfg.progressive_disclosure_chars).await {
-                    Ok(d)  => d.into_string(),
-                    Err(e) => {
-                        eprintln!("[researcher] progressive disclosure failed: {e:#}");
-                        result.report.unwrap_or_default()
-                    }
+    let mode = match input.mode.as_deref().unwrap_or("report") {
+        "quick"   => ResearchMode::Quick,
+        "summary" => ResearchMode::Summary,
+        "deep"    => ResearchMode::Deep,
+        _         => ResearchMode::Report,
+    };
+
+    let cfg_owned: Option<Config> = if input.max_queries.is_some() || input.max_sources.is_some() {
+        let mut owned = (*cfg).clone();
+        if let Some(mq) = input.max_queries   { owned.max_search_queries    = mq; }
+        if let Some(ms) = input.max_sources   { owned.max_sources_per_query = ms; }
+        Some(owned)
+    } else {
+        None
+    };
+    let cfg_use: &Config = cfg_owned.as_ref().unwrap_or(&cfg);
+
+    let request = ResearchRequest {
+        topic: input.query,
+        mode,
+        domains: input.domains.unwrap_or_default(),
+        domain_profile: input.domain_profile,
+        target: ResearchTarget::default(),
+        intent: input.intent,
+    };
+
+    match run(cfg_use, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
+        Ok(r) => {
+            let llm = LlmClient::new(cfg_use);
+            let style = input.summary_style.as_deref().unwrap_or("abstract");
+            match maybe_disclose(&llm, &request.topic, &r, style, cfg_use.progressive_disclosure_chars).await {
+                Ok(d)  => d.into_string(),
+                Err(e) => {
+                    eprintln!("[researcher] progressive disclosure failed: {e:#}");
+                    serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
                 }
             }
-            Err(e) => format!("Error writing report: {e:#}"),
+        }
+        Err(e) => format!("Error: {e:#}"),
+    }
+}
+
+async fn dispatch_person(cfg: std::sync::Arc<Config>, input: ResearchInput) -> String {
+    use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest, ResearchTarget, PersonMethod};
+
+    let method: PersonMethod = input.person_method
+        .as_deref()
+        .unwrap_or("both")
+        .parse()
+        .unwrap_or(PersonMethod::Both);
+
+    let request = ResearchRequest {
+        topic: input.query,
+        mode: ResearchMode::Report,
+        domains: vec![],
+        domain_profile: None,
+        target: ResearchTarget::Person { method },
+        intent: None,
+    };
+
+    match run(&cfg, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
+        Ok(r) => {
+            let llm = LlmClient::new(&cfg);
+            let style = input.summary_style.as_deref().unwrap_or("abstract");
+            match maybe_disclose(&llm, &request.topic, &r, style, cfg.progressive_disclosure_chars).await {
+                Ok(d)  => d.into_string(),
+                Err(e) => {
+                    eprintln!("[researcher] progressive disclosure failed: {e:#}");
+                    serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
+                }
+            }
+        }
+        Err(e) => format!("Error: {e:#}"),
+    }
+}
+
+async fn dispatch_company(cfg: std::sync::Arc<Config>, input: ResearchInput) -> String {
+    use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest, ResearchTarget};
+
+    let topic = if let Some(c) = input.country {
+        format!("{} {}", input.query, c)
+    } else {
+        input.query
+    };
+
+    let request = ResearchRequest {
+        topic,
+        mode: ResearchMode::Report,
+        domains: vec![],
+        domain_profile: None,
+        target: ResearchTarget::Company,
+        intent: None,
+    };
+
+    match run(&cfg, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
+        Ok(r) => {
+            let llm = LlmClient::new(&cfg);
+            let style = input.summary_style.as_deref().unwrap_or("abstract");
+            match maybe_disclose(&llm, &request.topic, &r, style, cfg.progressive_disclosure_chars).await {
+                Ok(d)  => d.into_string(),
+                Err(e) => {
+                    eprintln!("[researcher] progressive disclosure failed: {e:#}");
+                    serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
+                }
+            }
+        }
+        Err(e) => format!("Error: {e:#}"),
+    }
+}
+
+async fn dispatch_market(cfg: std::sync::Arc<Config>, input: ResearchInput) -> String {
+    use crate::researcher::pipeline::{run, AssetClass, ResearchMode, ResearchRequest, ResearchTarget};
+
+    let asset_class: AssetClass = input.asset_class
+        .as_deref()
+        .unwrap_or("macro")
+        .parse()
+        .unwrap_or_default();
+
+    let mode = match input.mode.as_deref().unwrap_or("report") {
+        "quick"   => ResearchMode::Quick,
+        "summary" => ResearchMode::Summary,
+        "deep"    => ResearchMode::Deep,
+        _         => ResearchMode::Report,
+    };
+
+    let target = ResearchTarget::Market { asset_class };
+    let domains = crate::researcher::pipeline::domains_for_target(&target);
+
+    let request = ResearchRequest {
+        topic: input.query,
+        mode,
+        domains,
+        domain_profile: None,
+        target,
+        intent: None,
+    };
+
+    match run(&cfg, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
+        Ok(r) => {
+            let llm = LlmClient::new(&cfg);
+            let style = input.summary_style.as_deref().unwrap_or("abstract");
+            match maybe_disclose(&llm, &request.topic, &r, style, cfg.progressive_disclosure_chars).await {
+                Ok(d)  => d.into_string(),
+                Err(e) => {
+                    eprintln!("[researcher] progressive disclosure failed: {e:#}");
+                    serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
+                }
+            }
+        }
+        Err(e) => format!("Error: {e:#}"),
+    }
+}
+
+async fn dispatch_code(cfg: std::sync::Arc<Config>, input: ResearchInput) -> String {
+    use crate::researcher::crawler::crawl_all;
+    use crate::researcher::summarizer::summarize_all;
+    use crate::researcher::publisher::write_code_report;
+    use crate::researcher::pipeline::ResearchResult;
+
+    let version = input.version.as_deref().unwrap_or("latest").to_string();
+    let framework = input.query.clone();
+    let aspects = input.aspects.unwrap_or_else(|| {
+        vec!["bugs".to_string(), "changelog".to_string(), "community".to_string()]
+    });
+
+    let q = input.keywords.as_deref().unwrap_or("").trim().to_string();
+    let q_suffix = if q.is_empty() { String::new() } else { format!(" {q}") };
+
+    let mut queries: Vec<String> = Vec::new();
+    for aspect in &aspects {
+        match aspect.as_str() {
+            "bugs" => {
+                queries.push(format!("{framework} {version}{q_suffix} bug issue"));
+                if let Some(repo) = &input.repo {
+                    queries.push(format!("{framework} {version}{q_suffix} issue site:github.com/{repo}/issues"));
+                }
+            }
+            "changelog" => {
+                queries.push(format!("{framework} {version}{q_suffix} changelog release notes"));
+                queries.push(format!("{framework} {version}{q_suffix} breaking changes"));
+            }
+            "community" => {
+                queries.push(format!("{framework} {version}{q_suffix} site:reddit.com"));
+                queries.push(format!("{framework} {version}{q_suffix} site:news.ycombinator.com"));
+            }
+            "releases" => {
+                queries.push(format!("{framework} {version}{q_suffix} release"));
+                if let Some(repo) = &input.repo {
+                    queries.push(format!("{framework} {version}{q_suffix} site:github.com/{repo}/releases"));
+                }
+            }
+            _ => {}
         }
     }
 
-    #[tool(description = "Market insight research: stocks, crypto, and macro. Web research only — no price APIs.")]
-    async fn market_insight(
-        &self,
-        Parameters(input): Parameters<MarketInsightInput>,
-    ) -> String {
-        use crate::researcher::pipeline::{
-            run, AssetClass, ResearchMode, ResearchRequest, ResearchTarget,
-        };
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap(); // ClientBuilder::build() only fails if TLS cannot initialize — unrecoverable
+    let llm = LlmClient::new(&cfg);
+    let topic = format!("{framework} {version}{q_suffix}");
 
-        let asset_class: AssetClass = input
-            .asset_class
-            .as_deref()
-            .unwrap_or("macro")
-            .parse()
-            .unwrap_or_default();
-
-        let mode: ResearchMode = input
-            .mode
-            .as_deref()
-            .unwrap_or("report")
-            .parse()
-            .unwrap_or_default();
-
-        let target = ResearchTarget::Market { asset_class };
-        let domains = crate::researcher::pipeline::domains_for_target(&target);
-
-        let request = ResearchRequest {
-            topic: input.query.clone(),
-            mode,
-            domains,
-            domain_profile: None,
-            target,
-            intent: None,
-        };
-
-        match run(
-            &self.cfg,
-            &request,
-            |ev| eprintln!("[researcher] {ev}"),
-            None,
-        ).await {
-            Ok(r) => {
-                let llm = LlmClient::new(&self.cfg);
-                let style = input.summary_style.as_deref().unwrap_or("abstract");
-                match maybe_disclose(&llm, &input.query, &r, style, self.cfg.progressive_disclosure_chars).await {
-                    Ok(d)  => d.into_string(),
-                    Err(e) => {
-                        eprintln!("[researcher] progressive disclosure failed: {e:#}");
-                        serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
-                    }
-                }
-            }
-            Err(e) => format!("Error: {e:#}"),
-        }
+    let sources = crawl_all(&http, &cfg, &queries).await;
+    if sources.is_empty() {
+        return format!("Error: no sources found for {topic}");
     }
 
+    let summaries = summarize_all(&llm, &sources, &topic).await;
+    if summaries.is_empty() {
+        return format!("Error: could not summarize sources for {topic}");
+    }
+
+    match write_code_report(&llm, &summaries, &framework, &version, &aspects).await {
+        Ok(report) => {
+            let style = input.summary_style.as_deref().unwrap_or("abstract");
+            let result = ResearchResult {
+                report: Some(report),
+                sources: vec![],
+                queries,
+            };
+            match maybe_disclose(&llm, &framework, &result, style, cfg.progressive_disclosure_chars).await {
+                Ok(d)  => d.into_string(),
+                Err(e) => {
+                    eprintln!("[researcher] progressive disclosure failed: {e:#}");
+                    result.report.unwrap_or_default()
+                }
+            }
+        }
+        Err(e) => format!("Error writing report: {e:#}"),
+    }
+}
+
+async fn dispatch_jobs(cfg: std::sync::Arc<Config>, input: ResearchInput) -> String {
+    use crate::jobs::fetcher::fetch_jobs;
+    use crate::jobs::scorer::score_listings;
+    use crate::jobs::publisher::write_job_report;
+
+    let profile = match &cfg.job_profile {
+        Some(p) => p.clone(),
+        None => return "Error: no [job-profile] section found in profiles.toml. \
+                        Add one to enable job search.".to_string(),
+    };
+
+    let deep = input.mode.as_deref() == Some("deep");
+
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap(); // ClientBuilder::build() only fails if TLS cannot initialize — unrecoverable
+    let llm = LlmClient::new(&cfg);
+
+    let listings = fetch_jobs(&http, &cfg, &input.query, &profile).await;
+
+    let scored = match score_listings(&llm, &listings, &profile, 6).await {
+        Ok(s) => s,
+        Err(e) => return format!("Error scoring listings: {e:#}"),
+    };
+
+    match write_job_report(&cfg, &scored, &input.query, deep).await {
+        Ok(report) => report,
+        Err(e) => format!("Error writing report: {e:#}"),
+    }
 }
 
 #[tool_handler]
@@ -483,17 +414,30 @@ impl ServerHandler for ResearcherServer {
                 .build(),
         )
         .with_instructions(
-            "Param guide\n\
+            "Single tool: research(query, target?, ...)\n\
              \n\
+             target:        topic(default)|person|company|market|code|jobs\n\
              mode:          quick=snippets | summary=bullets | report=full(default) | deep=2×sources+exhaustive\n\
              intent:        developer-docs | news | product-research | academic | general(default)\n\
              domain_profile: named preset (news/academic/tech-news/llm-news/shopping-ro/travel)\n\
              domains:       ad-hoc site list — unions with domain_profile\n\
+             summary_style: toc | abstract(default) | takeaways\n\
+             \n\
+             Per-target params\n\
+             \n\
+             [person]  person_method: company|personal|both(default)\n\
+             [company] country: disambiguates name\n\
+             [market]  asset_class: stock|crypto|macro(default)\n\
+             [code]    version, aspects (bugs|changelog|community|releases), repo (owner/repo), keywords\n\
+             [jobs]    uses profiles.toml [job-profile]; mode=deep for full descriptions\n\
              \n\
              Examples\n\
              \n\
-             research(\"Axum 0.8 breaking changes\", intent=\"developer-docs\", mode=\"report\")\n\
+             research(\"Axum 0.8 breaking changes\", target=\"code\", version=\"0.8\")\n\
              research(\"OpenAI o3 release\", intent=\"news\", domain_profile=\"news\", mode=\"summary\")\n\
+             research(\"Elon Musk\", target=\"person\", person_method=\"company\")\n\
+             research(\"BTC halving\", target=\"market\", asset_class=\"crypto\")\n\
+             research(\"senior Rust engineer\", target=\"jobs\")\n\
              \n\
              Progressive Disclosure\n\
              \n\
@@ -501,7 +445,6 @@ impl ServerHandler for ResearcherServer {
              ~/.local/share/researcher/<timestamp>-<slug>.md and compact envelope returned:\n\
                { summary, toc, path, word_count, hint }\n\
              Read full report at 'path' with a file-reading tool.\n\
-             summary_style: toc=headings+path(cheapest) | abstract=LLM+TOC+path(default) | takeaways=bullets+TOC+path\n\
              Set PROGRESSIVE_DISCLOSURE_CHARS=0 to always return inline.\
              ".to_string(),
         )
