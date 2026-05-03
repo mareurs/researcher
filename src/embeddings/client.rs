@@ -5,7 +5,8 @@ use tracing::debug;
 
 #[derive(Serialize)]
 struct EmbedRequest {
-    inputs: Vec<String>,
+    model: String,
+    input: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -49,8 +50,8 @@ impl EmbedClient {
 
         debug!(count = texts.len(), "embedding batch");
 
-        let url = format!("{}/embed", self.base_url);
-        let req = EmbedRequest { inputs: texts.to_vec() };
+        let url = format!("{}/v1/embeddings", self.base_url);
+        let req = EmbedRequest { model: String::new(), input: texts.to_vec() };
 
         let resp = self
             .http
@@ -63,7 +64,7 @@ impl EmbedClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("TEI embed error {status}: {body}");
+            anyhow::bail!("embed error {status}: {body}");
         }
 
         let body: EmbedResponse = resp.json().await.context("embed parse")?;
