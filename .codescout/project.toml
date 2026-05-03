@@ -6,11 +6,6 @@ languages = [
 ]
 encoding = "utf-8"
 tool_timeout_secs = 60
-
-[embeddings]
-model = "ollama:nomic-embed-text"
-drift_detection_enabled = true
-
 [ignored_paths]
 patterns = []
 

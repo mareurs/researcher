@@ -1,76 +1,151 @@
-# Researcher Progressive Disclosure Implementation Plan
+# Progressive Disclosure Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** When a research report exceeds 4000 chars, save it to `/tmp/researcher/` and return a compact JSON (summary + TOC with line numbers + source count + file path) instead of dumping the full report inline.
+**Goal:** When a research report exceeds a char threshold, save it to disk and return a compact summary + TOC + path instead of dumping the full report into the agent's context.
 
-**Architecture:** New `src/researcher/disclosure.rs` holds types and logic. `src/researcher/planner.rs` gains a pure heuristic classifier. `mcp_server.rs` adds a threshold gate after `run()` that calls `disclose()` when the report is large. `server_instructions` teaches agents how to navigate the saved file.
+**Architecture:** Post-`run()` hook in the MCP layer. A new `src/researcher/progressive.rs` module provides three pure functions (`extract_toc`, `write_to_disk`, `generate_summary`) and one async entry point (`maybe_disclose`). All 5 research MCP tools and the HTTP JSON endpoint call `maybe_disclose` after `run()`. Reports below `PROGRESSIVE_DISCLOSURE_CHARS` (default 4000) return inline unchanged.
 
-**Tech Stack:** Rust, `serde`/`serde_json`, `anyhow`, `tokio`, `LlmClient` (already in crate)
+**Tech Stack:** Rust, `chrono 0.4` (new dep for timestamp formatting), `anyhow`, `serde_json`, existing `LlmClient`.
 
 ---
 
 ## File Map
 
-| File | Action | Responsibility |
-|---|---|---|
-| `src/researcher/disclosure.rs` | Create | Types, TOC extraction, slug/save, LLM summarize, `disclose()` |
-| `src/researcher/mod.rs` | Modify | Add `pub mod disclosure` |
-| `src/researcher/planner.rs` | Modify | Add `classify_disclosure()` heuristic |
-| `src/mcp_server.rs` | Modify | `DisclosureHint` field on input, threshold gate, updated instructions |
+| File | Change |
+|---|---|
+| `Cargo.toml` | Add `chrono = "0.4"` |
+| `src/config.rs` | Add `progressive_disclosure_chars: usize` field |
+| `src/mcp_server.rs` `config_from_env()` | Mirror `PROGRESSIVE_DISCLOSURE_CHARS` |
+| `src/researcher/progressive.rs` | **New** — all progressive disclosure logic |
+| `src/researcher/mod.rs` | Add `pub mod progressive` |
+| `src/mcp_server.rs` structs | Add `summary_style: Option<String>` to 5 input structs |
+| `src/mcp_server.rs` tool methods | Call `maybe_disclose` in 5 tool methods |
+| `src/mcp_server.rs` `get_info()` | Document new param + envelope shape |
+| `src/server.rs` | Add `summary_style` to `ResearchBody`, wire `research_json` |
 
 ---
 
-### Task 1: Create `disclosure.rs` with types and TOC extraction
+## Task 1: Add `chrono` dep and `progressive_disclosure_chars` config field
 
 **Files:**
-- Create: `src/researcher/disclosure.rs`
-- Modify: `src/researcher/mod.rs`
+- Modify: `Cargo.toml`
+- Modify: `src/config.rs` (end of `Config` struct, around line 196)
+- Modify: `src/mcp_server.rs` (`config_from_env`, around line 532)
 
-- [ ] **Step 1: Write the failing test for `extract_toc`**
+- [ ] **Step 1: Add chrono to Cargo.toml**
 
-Add at the bottom of `src/researcher/disclosure.rs` (file doesn't exist yet — create it):
+In `Cargo.toml`, add to `[dependencies]` after `anyhow = "1"`:
+
+```toml
+chrono = "0.4"
+```
+
+- [ ] **Step 2: Add config field to `src/config.rs`**
+
+Find the `Config` struct's last field (around line 192):
+```rust
+    #[clap(skip)]
+    pub job_profile: Option<JobProfile>,
+}
+```
+
+Replace with:
+```rust
+    #[clap(skip)]
+    pub job_profile: Option<JobProfile>,
+
+    /// Char length above which MCP tools save the report to disk and return a compact envelope.
+    /// Set to 0 to always return inline (disables feature).
+    #[arg(long, env = "PROGRESSIVE_DISCLOSURE_CHARS", default_value = "4000")]
+    pub progressive_disclosure_chars: usize,
+}
+```
+
+- [ ] **Step 3: Mirror in `config_from_env()` in `src/mcp_server.rs`**
+
+In `config_from_env()` (around line 532), add alongside the other `env_usize` calls:
 
 ```rust
-use crate::researcher::pipeline::SourceEntry;
-use crate::llm::client::{ChatMessage, LlmClient};
-use anyhow::Result;
+        progressive_disclosure_chars: env_usize("PROGRESSIVE_DISCLOSURE_CHARS", 4000),
+```
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DisclosureHint {
-    pub summary_focus: String,
-    pub include_sources: bool,
+- [ ] **Step 4: Verify**
+
+```bash
+cargo check
+```
+
+Expected: no errors.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add Cargo.toml src/config.rs src/mcp_server.rs
+git commit -m "feat: add progressive_disclosure_chars config field"
+```
+
+---
+
+## Task 2: Create `src/researcher/progressive.rs`
+
+**Files:**
+- Create: `src/researcher/progressive.rs`
+- Modify: `Cargo.toml` (add `tempfile` dev-dep)
+
+- [ ] **Step 1: Write tests + stub signatures**
+
+Create `src/researcher/progressive.rs`:
+
+```rust
+use std::path::PathBuf;
+use anyhow::Result;
+use chrono::Local;
+use crate::llm::client::{ChatMessage, LlmClient};
+use crate::researcher::pipeline::ResearchResult;
+
+#[derive(Debug, serde::Serialize)]
+pub struct ProgressiveEnvelope {
+    pub summary: String,
+    pub toc: Vec<String>,
+    pub path: String,
+    pub word_count: usize,
+    pub hint: &'static str,
 }
 
-impl Default for DisclosureHint {
-    fn default() -> Self {
-        Self {
-            summary_focus: "main findings and key points".into(),
-            include_sources: true,
+pub enum MaybeDisclosed {
+    Inline(String),
+    Progressive(String),
+}
+
+impl MaybeDisclosed {
+    pub fn into_string(self) -> String {
+        match self {
+            MaybeDisclosed::Inline(s) | MaybeDisclosed::Progressive(s) => s,
         }
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct TocEntry {
-    pub heading: String,
-    pub line: usize,
+pub fn extract_toc(report: &str) -> Vec<String> {
+    todo!()
 }
 
-#[derive(Debug, serde::Serialize)]
-pub struct DisclosedResult {
-    pub summary: String,
-    pub toc: Vec<TocEntry>,
-    pub source_count: usize,
-    pub queries_used: Vec<String>,
-    pub report_path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sources: Option<Vec<SourceEntry>>,
+pub fn write_to_disk(topic: &str, report: &str) -> Result<PathBuf> {
+    todo!()
 }
 
-pub fn extract_toc(report: &str) -> Vec<TocEntry> {
-    // placeholder — tests will drive implementation
-    vec![]
+pub async fn generate_summary(llm: &LlmClient, report: &str, style: &str) -> Result<String> {
+    todo!()
+}
+
+pub async fn maybe_disclose(
+    llm: &LlmClient,
+    topic: &str,
+    result: &ResearchResult,
+    summary_style: &str,
+    threshold: usize,
+) -> Result<MaybeDisclosed> {
+    todo!()
 }
 
 #[cfg(test)]
@@ -78,450 +153,268 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_toc_finds_headings() {
-        let report = "# Title\n\nsome text\n\n## Section One\n\nmore text\n\n### Sub\n\n#### Skip\n\n## Section Two\n";
+    fn extract_toc_returns_h2_headings() {
+        let report = "# Title\n\nSome text.\n\n## Executive Summary\n\nMore.\n\n## Key Findings\n\n- foo\n\n### Subsection\n\n## Sources\n";
         let toc = extract_toc(report);
-        assert_eq!(toc.len(), 4); // h1, h2, h3, h2 — h4 excluded
-        assert_eq!(toc[0].heading, "# Title");
-        assert_eq!(toc[0].line, 1);
-        assert_eq!(toc[1].heading, "## Section One");
-        assert_eq!(toc[1].line, 5);
-        assert_eq!(toc[2].heading, "### Sub");
-        assert_eq!(toc[2].line, 9);
-        assert_eq!(toc[3].heading, "## Section Two");
-        assert_eq!(toc[3].line, 13);
+        assert_eq!(toc, vec![
+            "## Executive Summary".to_string(),
+            "## Key Findings".to_string(),
+            "## Sources".to_string(),
+        ]);
     }
 
     #[test]
-    fn test_extract_toc_empty_report() {
+    fn extract_toc_empty_report() {
         assert!(extract_toc("").is_empty());
     }
 
     #[test]
-    fn test_extract_toc_no_headings() {
-        assert!(extract_toc("just some plain text\nno headings here").is_empty());
+    fn extract_toc_no_h2() {
+        let report = "# Title\n\n### Only h3\n\ntext";
+        assert!(extract_toc(report).is_empty());
+    }
+
+    #[test]
+    fn write_to_disk_creates_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", dir.path());
+        let path = write_to_disk("test topic", "# Report\n\nContent here.").unwrap();
+        assert!(path.exists());
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(contents, "# Report\n\nContent here.");
+        let name = path.file_name().unwrap().to_str().unwrap();
+        assert!(name.ends_with("-test-topic.md"), "got: {name}");
+    }
+
+    #[test]
+    fn write_to_disk_slug_strips_specials() {
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", dir.path());
+        let path = write_to_disk("Rust async/await: deep dive!", "content").unwrap();
+        let name = path.file_name().unwrap().to_str().unwrap();
+        assert!(name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '.'));
     }
 }
 ```
 
-- [ ] **Step 2: Run test to confirm it fails**
+- [ ] **Step 2: Add `tempfile` dev-dependency**
 
-```bash
-cd /home/marius/work/claude/researcher
-cargo test disclosure::tests::test_extract_toc_finds_headings 2>&1
+In `Cargo.toml`:
+```toml
+[dev-dependencies]
+tempfile = "3"
 ```
 
-Expected: FAIL — `assert_eq!(toc.len(), 4)` fails because `extract_toc` returns `vec![]`
+- [ ] **Step 3: Run tests to confirm they fail (not panic)**
 
-- [ ] **Step 3: Implement `extract_toc`**
+```bash
+cargo test progressive 2>&1 | head -30
+```
 
-Replace the placeholder in `src/researcher/disclosure.rs`:
+Expected: compile error or `todo!()` panics — confirms tests are wired up.
 
+- [ ] **Step 4: Implement `extract_toc`**
+
+Replace `todo!()` in `extract_toc`:
 ```rust
-pub fn extract_toc(report: &str) -> Vec<TocEntry> {
+pub fn extract_toc(report: &str) -> Vec<String> {
     report
         .lines()
-        .enumerate()
-        .filter_map(|(i, line)| {
-            let trimmed = line.trim_start();
-            if !trimmed.starts_with('#') {
-                return None;
-            }
-            let level = trimmed.chars().take_while(|c| *c == '#').count();
-            if level > 3 {
-                return None;
-            }
-            Some(TocEntry { heading: line.to_string(), line: i + 1 })
-        })
+        .filter(|line| line.starts_with("## "))
+        .map(str::to_string)
         .collect()
 }
 ```
 
-- [ ] **Step 4: Run tests to confirm they pass**
+- [ ] **Step 5: Implement `write_to_disk`**
+
+Replace `todo!()` in `write_to_disk`:
+```rust
+pub fn write_to_disk(topic: &str, report: &str) -> Result<PathBuf> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let data_dir = PathBuf::from(home).join(".local/share/researcher");
+    std::fs::create_dir_all(&data_dir)?;
+
+    let slug: String = topic
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let slug: String = slug.chars().take(40).collect();
+
+    let ts = Local::now().format("%Y-%m-%dT%H-%M-%S");
+    let filename = format!("{ts}-{slug}.md");
+    let path = data_dir.join(filename);
+    std::fs::write(&path, report)?;
+    Ok(path)
+}
+```
+
+- [ ] **Step 6: Run tests — 5 tests should pass**
 
 ```bash
-cd /home/marius/work/claude/researcher
-cargo test disclosure::tests 2>&1
+cargo test progressive 2>&1 | tail -15
 ```
 
-Expected: 3 tests pass
-
-- [ ] **Step 5: Add `pub mod disclosure` to `src/researcher/mod.rs`**
-
-The file currently contains:
+Expected:
 ```
-pub mod crawler;
-pub mod pipeline;
-pub mod planner;
-pub mod publisher;
-pub mod quality;
-pub mod summarizer;
+test researcher::progressive::tests::extract_toc_empty_report ... ok
+test researcher::progressive::tests::extract_toc_no_h2 ... ok
+test researcher::progressive::tests::extract_toc_returns_h2_headings ... ok
+test researcher::progressive::tests::write_to_disk_creates_file ... ok
+test researcher::progressive::tests::write_to_disk_slug_strips_specials ... ok
 ```
-
-Add one line:
-```
-pub mod disclosure;
-```
-
-- [ ] **Step 6: Verify it compiles**
-
-```bash
-cd /home/marius/work/claude/researcher
-cargo check 2>&1
-```
-
-Expected: no errors
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/marius/work/claude/researcher
-git add src/researcher/disclosure.rs src/researcher/mod.rs
-git commit -m "feat(disclosure): types + TOC extraction"
+git add Cargo.toml src/researcher/progressive.rs
+git commit -m "feat: progressive module — extract_toc and write_to_disk with tests"
 ```
 
 ---
 
-### Task 2: Slug generation and file saving
+## Task 3: Register module and implement async fns
 
 **Files:**
-- Modify: `src/researcher/disclosure.rs`
+- Modify: `src/researcher/mod.rs`
+- Modify: `src/researcher/progressive.rs`
 
-- [ ] **Step 1: Write failing tests for `make_slug` and `save_report`**
+- [ ] **Step 1: Register module**
 
-Add to the `tests` module in `src/researcher/disclosure.rs`:
-
+Append to `src/researcher/mod.rs`:
 ```rust
-    #[test]
-    fn test_make_slug_basic() {
-        assert_eq!(make_slug("Axum 0.8 breaking changes"), "axum-0-8-breaking-changes");
-    }
-
-    #[test]
-    fn test_make_slug_truncates_at_40() {
-        let long = "this is a very long query that exceeds forty characters easily";
-        assert!(make_slug(long).len() <= 40);
-    }
-
-    #[test]
-    fn test_make_slug_collapses_separators() {
-        assert_eq!(make_slug("hello -- world  !!"), "hello-world");
-    }
-
-    #[test]
-    fn test_save_report_creates_file() {
-        let content = "# Test\n\nsome content";
-        let path = save_report(content, "test save query").unwrap();
-        assert!(std::path::Path::new(&path).exists());
-        let read_back = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(read_back, content);
-        std::fs::remove_file(&path).ok();
-    }
+pub mod progressive;
 ```
 
-- [ ] **Step 2: Run tests to confirm they fail**
+- [ ] **Step 2: Implement `generate_summary`**
 
-```bash
-cd /home/marius/work/claude/researcher
-cargo test disclosure::tests::test_make_slug 2>&1
-```
-
-Expected: compile error — `make_slug` not defined
-
-- [ ] **Step 3: Implement `make_slug` and `save_report`**
-
-Add to `src/researcher/disclosure.rs` (before the `#[cfg(test)]` block):
-
+Replace `todo!()` in `generate_summary`:
 ```rust
-pub fn make_slug(query: &str) -> String {
-    let slug: String = query
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect();
-    // collapse multiple dashes and trim edges
-    let parts: Vec<&str> = slug.split('-').filter(|s| !s.is_empty()).collect();
-    let joined = parts.join("-");
-    joined.chars().take(40).collect()
-}
-
-pub fn save_report(report: &str, query: &str) -> Result<String> {
-    let dir = std::path::Path::new("/tmp/researcher");
-    std::fs::create_dir_all(dir)?;
-    let slug = make_slug(query);
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let path = dir.join(format!("{slug}-{ts}.md"));
-    std::fs::write(&path, report)?;
-    Ok(path.to_string_lossy().into_owned())
-}
-```
-
-- [ ] **Step 4: Run tests**
-
-```bash
-cd /home/marius/work/claude/researcher
-cargo test disclosure::tests 2>&1
-```
-
-Expected: all 7 tests pass
-
-- [ ] **Step 5: Commit**
-
-```bash
-cd /home/marius/work/claude/researcher
-git add src/researcher/disclosure.rs
-git commit -m "feat(disclosure): slug generation + file saving"
-```
-
----
-
-### Task 3: Query classifier in `planner.rs`
-
-**Files:**
-- Modify: `src/researcher/planner.rs`
-
-- [ ] **Step 1: Write failing tests**
-
-Add to the bottom of `src/researcher/planner.rs`:
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::researcher::disclosure::DisclosureHint;
-
-    #[test]
-    fn test_classify_fact_query() {
-        let h = classify_disclosure("what is the capital of France", None);
-        assert_eq!(h.summary_focus, "key facts and direct answer");
-        assert!(!h.include_sources);
+pub async fn generate_summary(llm: &LlmClient, report: &str, style: &str) -> Result<String> {
+    if style == "toc" {
+        return Ok(extract_toc(report).join("\n"));
     }
 
-    #[test]
-    fn test_classify_howto_query() {
-        let h = classify_disclosure("how to implement OAuth2 in Rust", None);
-        assert_eq!(h.summary_focus, "what solves the problem and how to implement it");
-        assert!(h.include_sources);
-    }
-
-    #[test]
-    fn test_classify_news_query() {
-        let h = classify_disclosure("OpenAI latest announcements 2026", None);
-        assert_eq!(h.summary_focus, "what happened and the key outcome");
-        assert!(h.include_sources);
-    }
-
-    #[test]
-    fn test_classify_general_query() {
-        let h = classify_disclosure("transformer attention mechanisms", None);
-        assert_eq!(h.summary_focus, "main findings and key points");
-        assert!(h.include_sources);
-    }
-
-    #[test]
-    fn test_classify_intent_overrides_topic() {
-        // intent="developer-docs" → howto classification
-        let h = classify_disclosure("axum middleware", Some("developer-docs"));
-        assert_eq!(h.summary_focus, "what solves the problem and how to implement it");
-    }
-}
-```
-
-- [ ] **Step 2: Run tests to confirm they fail**
-
-```bash
-cd /home/marius/work/claude/researcher
-cargo test planner::tests 2>&1
-```
-
-Expected: compile error — `classify_disclosure` not defined
-
-- [ ] **Step 3: Implement `classify_disclosure` in `src/researcher/planner.rs`**
-
-Add this import at the top of `src/researcher/planner.rs`:
-
-```rust
-use crate::researcher::disclosure::DisclosureHint;
-```
-
-Add this function before the `#[cfg(test)]` block (or at end of file if no test block yet):
-
-```rust
-/// Heuristic classification of a query for disclosure summarization.
-/// No LLM call — pure keyword matching on topic + intent.
-pub fn classify_disclosure(topic: &str, intent: Option<&str>) -> DisclosureHint {
-    let text = format!("{} {}", topic, intent.unwrap_or("")).to_lowercase();
-
-    let is_fact = ["what is ", "what are ", "when did ", "who is ", "where is ",
-                   "how many ", "define ", "definition of"]
-        .iter().any(|p| text.contains(p));
-
-    let is_howto = ["how to ", "implement", "build ", "create ", "setup ",
-                    "configure", "install ", "integrate", "migrate", "developer-docs"]
-        .iter().any(|p| text.contains(p));
-
-    let is_news = ["news", "latest", "recent", "2025", "2026", "today",
-                   "yesterday", "last week", "announced", "release"]
-        .iter().any(|p| text.contains(p));
-
-    if is_fact {
-        DisclosureHint {
-            summary_focus: "key facts and direct answer".into(),
-            include_sources: false,
-        }
-    } else if is_howto {
-        DisclosureHint {
-            summary_focus: "what solves the problem and how to implement it".into(),
-            include_sources: true,
-        }
-    } else if is_news {
-        DisclosureHint {
-            summary_focus: "what happened and the key outcome".into(),
-            include_sources: true,
-        }
-    } else {
-        DisclosureHint {
-            summary_focus: "main findings and key points".into(),
-            include_sources: true,
-        }
-    }
-}
-```
-
-- [ ] **Step 4: Run tests**
-
-```bash
-cd /home/marius/work/claude/researcher
-cargo test planner::tests 2>&1
-```
-
-Expected: all 5 tests pass
-
-- [ ] **Step 5: Commit**
-
-```bash
-cd /home/marius/work/claude/researcher
-git add src/researcher/planner.rs
-git commit -m "feat(disclosure): query classifier in planner"
-```
-
----
-
-### Task 4: LLM summarization and `disclose()` entry point
-
-**Files:**
-- Modify: `src/researcher/disclosure.rs`
-
-- [ ] **Step 1: Add `summarize_report` and `disclose`**
-
-Add to `src/researcher/disclosure.rs` (before `#[cfg(test)]`):
-
-```rust
-async fn summarize_report(report: &str, hint: &DisclosureHint, llm: &LlmClient) -> Result<String> {
-    let messages = vec![
-        ChatMessage::system(
-            "You are a research summarizer. Write a focused, direct summary in 3-5 sentences. \
-             No bullet points. No section headings. No caveats unless they are critical blockers.",
+    let prompt = match style {
+        "takeaways" => format!(
+            "Extract the 5-8 most important findings from this research report as a concise bullet list. \
+             Each bullet should be one specific fact, number, or conclusion. No introduction or headers.\n\n{report}"
         ),
-        ChatMessage::user(format!(
-            "Summarize this research focused on: {}\n\n{}",
-            hint.summary_focus,
-            // cap input to avoid blowing the context
-            &report[..report.len().min(8_000)],
-        )),
+        _ => format!(
+            "Write a 3-5 sentence abstract summarizing the key findings of this research report. \
+             Be specific — include key facts, numbers, and conclusions. No headers.\n\n{report}"
+        ),
+    };
+
+    let messages = vec![
+        ChatMessage::system("You are a research analyst. Summarize research reports concisely and accurately."),
+        ChatMessage::user(prompt),
     ];
     llm.complete(messages).await
 }
+```
 
-pub async fn disclose(
-    report: &str,
-    hint: &DisclosureHint,
+- [ ] **Step 3: Implement `maybe_disclose`**
+
+Replace `todo!()` in `maybe_disclose`:
+```rust
+pub async fn maybe_disclose(
     llm: &LlmClient,
-    query: &str,
-    sources: &[SourceEntry],
-    queries_used: &[String],
-) -> Result<DisclosedResult> {
-    let report_path = save_report(report, query)?;
-    let toc = extract_toc(report);
-    let summary = summarize_report(report, hint, llm).await?;
-    let sources_out = if hint.include_sources {
-        Some(sources.to_vec())
-    } else {
-        None
+    topic: &str,
+    result: &ResearchResult,
+    summary_style: &str,
+    threshold: usize,
+) -> Result<MaybeDisclosed> {
+    let report = match &result.report {
+        Some(r) => r,
+        None => {
+            return Ok(MaybeDisclosed::Inline(serde_json::to_string_pretty(result)?));
+        }
     };
-    Ok(DisclosedResult {
+
+    if threshold > 0 && report.len() <= threshold {
+        return Ok(MaybeDisclosed::Inline(serde_json::to_string_pretty(result)?));
+    }
+
+    let path = match write_to_disk(topic, report) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("progressive disclosure: disk write failed ({e:#}), returning inline");
+            return Ok(MaybeDisclosed::Inline(serde_json::to_string_pretty(result)?));
+        }
+    };
+
+    let summary = match generate_summary(llm, report, summary_style).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("progressive disclosure: summary failed ({e:#}), using toc");
+            extract_toc(report).join("\n")
+        }
+    };
+
+    let envelope = ProgressiveEnvelope {
+        toc: extract_toc(report),
+        word_count: report.split_whitespace().count(),
+        path: path.to_string_lossy().into_owned(),
         summary,
-        toc,
-        source_count: sources.len(),
-        queries_used: queries_used.to_vec(),
-        report_path,
-        sources: sources_out,
-    })
+        hint: "Full report saved to disk. Read the file at 'path' using a file-reading tool, or read specific sections by heading.",
+    };
+
+    Ok(MaybeDisclosed::Progressive(serde_json::to_string_pretty(&envelope)?))
 }
 ```
 
-- [ ] **Step 2: Verify it compiles**
+- [ ] **Step 4: cargo check**
 
 ```bash
-cd /home/marius/work/claude/researcher
-cargo check 2>&1
+cargo check
 ```
 
-Expected: no errors
+Expected: no errors.
 
-- [ ] **Step 3: Run all disclosure tests**
-
-```bash
-cd /home/marius/work/claude/researcher
-cargo test disclosure 2>&1
-```
-
-Expected: all 7 tests pass (no new tests for async fns — those are integration-tested end-to-end)
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-cd /home/marius/work/claude/researcher
-git add src/researcher/disclosure.rs
-git commit -m "feat(disclosure): LLM summarization + disclose() entry point"
+git add src/researcher/mod.rs src/researcher/progressive.rs
+git commit -m "feat: progressive disclosure — generate_summary and maybe_disclose"
 ```
 
 ---
 
-### Task 5: Wire disclosure into `mcp_server.rs`
+## Task 4: Wire into MCP tool methods
 
 **Files:**
 - Modify: `src/mcp_server.rs`
 
-- [ ] **Step 1: Add `disclosure_hint` to `ResearchInput`**
+- [ ] **Step 1: Add `summary_style` to all 5 input structs**
 
-`ResearchInput` is defined at lines 44–65 in `src/mcp_server.rs`. Add the new field after `intent`:
+For each struct, add before the closing `}`. The `#[schemars]` attribute makes the field appear in the MCP tool schema:
 
+`ResearchInput`:
 ```rust
-// existing last field:
-#[schemars(description = "Query intent: developer-docs | news | product-research | academic | general (default). Tunes planner query style. Orthogonal to domain_profile/domains.")]
-pub intent: Option<String>,
-
-// ADD THIS:
-#[schemars(description = "Optional hint for the disclosure summary. When absent, the planner classifies automatically. Pass to control focus: e.g. {\"summary_focus\": \"what solves the problem and how\", \"include_sources\": true}")]
-pub disclosure_hint: Option<crate::researcher::disclosure::DisclosureHint>,
+    /// How to summarize when report exceeds threshold: "toc", "abstract" (default), "takeaways"
+    #[schemars(description = "Summary style when report exceeds size threshold: toc | abstract (default) | takeaways")]
+    pub summary_style: Option<String>,
 ```
 
-- [ ] **Step 2: Add the threshold constant near the top of `mcp_server.rs`**
+Apply identically to `PersonResearchInput`, `CompanyResearchInput`, `CodeResearchInput`, `MarketInsightInput`.
 
-Add after the `use` imports (before the `struct` definitions, around line 40):
+- [ ] **Step 2: Add imports**
 
+Near the top of `src/mcp_server.rs`:
 ```rust
-const DISCLOSURE_THRESHOLD: usize = 4_000;
+use crate::researcher::progressive::maybe_disclose;
+use crate::llm::client::LlmClient;
 ```
 
-- [ ] **Step 3: Replace the `research()` body with the gated version**
+- [ ] **Step 3: Update `research` method**
 
-The current `research()` body (lines 142–178) ends with:
-
+Find and replace the `match run(...).await` block:
 ```rust
         match run(
             &cfg,
@@ -535,180 +428,231 @@ The current `research()` body (lines 142–178) ends with:
         }
 ```
 
-Replace the entire `research()` body with:
-
+Replace with:
 ```rust
-    async fn research(
-        &self,
-        Parameters(input): Parameters<ResearchInput>,
-    ) -> String {
-        use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest, ResearchTarget};
-        use crate::researcher::disclosure::disclose;
-        use crate::researcher::planner::classify_disclosure;
-        use crate::llm::client::LlmClient;
-
-        let mode = match input.mode.as_deref().unwrap_or("report") {
-            "quick"   => ResearchMode::Quick,
-            "summary" => ResearchMode::Summary,
-            "deep"    => ResearchMode::Deep,
-            _         => ResearchMode::Report,
-        };
-
-        // Clone what we need before input is partially moved into ResearchRequest
-        let query = input.query.clone();
-        let intent = input.intent.clone();
-        let caller_hint = input.disclosure_hint.clone();
-
-        let mut cfg = (*self.cfg).clone();
-        if let Some(mq) = input.max_queries   { cfg.max_search_queries    = mq; }
-        if let Some(ms) = input.max_sources   { cfg.max_sources_per_query = ms; }
-
-        let request = ResearchRequest {
-            topic: input.query,
-            mode,
-            domains: input.domains.unwrap_or_default(),
-            domain_profile: input.domain_profile,
-            target: ResearchTarget::default(),
-            intent: input.intent,
-        };
-
-        match run(&cfg, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
+        match run(
+            &cfg,
+            &request,
+            |ev| eprintln!("[researcher] {ev}"),
+            None,
+        ).await
+        {
             Ok(r) => {
-                let report = r.report.as_deref().unwrap_or("");
-                if report.len() > DISCLOSURE_THRESHOLD {
-                    let hint = caller_hint
-                        .unwrap_or_else(|| classify_disclosure(&query, intent.as_deref()));
-                    let llm = LlmClient::new(&cfg);
-                    match disclose(report, &hint, &llm, &query, &r.sources, &r.queries).await {
-                        Ok(d) => serde_json::to_string_pretty(&d)
-                            .unwrap_or_else(|e| e.to_string()),
-                        Err(e) => {
-                            // Fallback to inline on disclosure failure — don't lose the result
-                            eprintln!("[researcher] disclosure failed, returning inline: {e:#}");
-                            serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
-                        }
+                let llm = LlmClient::new(&cfg);
+                let style = input.summary_style.as_deref().unwrap_or("abstract");
+                match maybe_disclose(&llm, &request.topic, &r, style, cfg.progressive_disclosure_chars).await {
+                    Ok(d)  => d.into_string(),
+                    Err(e) => {
+                        eprintln!("[researcher] progressive disclosure failed: {e:#}");
+                        serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
                     }
-                } else {
-                    serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
                 }
             }
             Err(e) => format!("Error: {e:#}"),
         }
-    }
 ```
 
-- [ ] **Step 4: Verify it compiles**
+- [ ] **Step 4: Update `research_person` — topic is `input.name`**
 
-```bash
-cd /home/marius/work/claude/researcher
-cargo check 2>&1
+Same replacement pattern. In the `Ok(r)` arm:
+```rust
+            Ok(r) => {
+                let llm = LlmClient::new(&cfg);
+                let style = input.summary_style.as_deref().unwrap_or("abstract");
+                match maybe_disclose(&llm, &input.name, &r, style, cfg.progressive_disclosure_chars).await {
+                    Ok(d)  => d.into_string(),
+                    Err(e) => {
+                        eprintln!("[researcher] progressive disclosure failed: {e:#}");
+                        serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
+                    }
+                }
+            }
 ```
 
-Expected: no errors
+- [ ] **Step 5: Update `research_company` — topic is `input.name`**
 
-- [ ] **Step 5: Run all tests**
+Identical to `research_person` replacement above.
 
-```bash
-cd /home/marius/work/claude/researcher
-cargo test 2>&1
+- [ ] **Step 6: Update `research_code` — topic is `input.framework`**
+
+Same pattern, `&input.framework` as topic arg.
+
+- [ ] **Step 7: Update `market_insight` — topic is `input.query`**
+
+Same pattern, `&input.query` as topic arg.
+
+- [ ] **Step 8: Update `get_info()` instructions**
+
+In the `with_instructions(...)` string, append after the tool bullets:
+
+```
+\n\n## Progressive Disclosure\n\
+When a report exceeds PROGRESSIVE_DISCLOSURE_CHARS (default: 4000 chars), the full report\n\
+is saved to ~/.local/share/researcher/<timestamp>-<slug>.md and a compact envelope is returned:\n\
+  { summary, toc, path, word_count, hint }\n\
+Read the full report at 'path' with a standard file-reading tool.\n\n\
+summary_style param (optional, all research tools except search_jobs):\n\
+  \"abstract\"  — 3-5 sentence LLM abstract + TOC + path (default)\n\
+  \"toc\"       — headings only + path, no LLM call (cheapest)\n\
+  \"takeaways\" — 5-8 bullet key findings + TOC + path\n\n\
+Set PROGRESSIVE_DISCLOSURE_CHARS=0 to always return inline.
 ```
 
-Expected: all tests pass
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 9: cargo check**
 
 ```bash
-cd /home/marius/work/claude/researcher
+cargo check
+```
+
+Expected: no errors.
+
+- [ ] **Step 10: Commit**
+
+```bash
 git add src/mcp_server.rs
-git commit -m "feat(disclosure): threshold gate + disclosure_hint in research()"
+git commit -m "feat: wire progressive disclosure into MCP tool methods"
 ```
 
 ---
 
-### Task 6: Update `server_instructions` in `get_info()`
+## Task 5: Wire into HTTP server
 
 **Files:**
-- Modify: `src/mcp_server.rs`
+- Modify: `src/server.rs`
 
-- [ ] **Step 1: Append navigation block to the `with_instructions` string**
+- [ ] **Step 1: Add `summary_style` to `ResearchBody`**
 
-In `get_info()` (around line 417), the `with_instructions(...)` call ends with the last example line:
-
+In `ResearchBody` struct (around line 22), add after `intent`:
 ```rust
-             research(\"attention mechanism transformers\",\n\
-               intent=\\\"academic\\\", domain_profile=\\\"academic\\\", mode=\\\"report\\\")\n\
-             \".to_string(),
+    pub summary_style: Option<String>,
 ```
 
-Replace that closing section with:
+- [ ] **Step 2: Replace `research_json` body**
 
+Current body (lines 81–98):
 ```rust
-             research(\"attention mechanism transformers\",\n\
-               intent=\\\"academic\\\", domain_profile=\\\"academic\\\", mode=\\\"report\\\")\n\
-             \n\
-             ── Research Results Navigation ────────────────────────────────\n\
-             \n\
-             When a result contains `report_path`, the full report is saved on disk.\n\
-             Read `summary` first — if it answers your question, skip the file entirely.\n\
-             Only drill down when you need details the summary omits.\n\
-             \n\
-             Navigation:\n\
-               Full report:      read_file(\"<report_path>\")\n\
-               Targeted section: run_command(\"sed -n '<line>,<end>p' <report_path>\")\n\
-               Search within:    run_command(\"grep -n '<keyword>' <report_path>\")\n\
-               Sources:          listed inline in `sources[]` when present\n\
-             \n\
-             For fact queries and quick lookups where summary suffices — do not open the file.\n\
-             \".to_string(),
+async fn research_json(
+    State(cfg): State<AppState>,
+    Json(req): Json<ResearchBody>,
+) -> Response {
+    let request = into_pipeline_request(req);
+    let result = run(&cfg, &request, |_| {}, None).await;
+    match result {
+        Ok(r) => Json(serde_json::json!({
+            "report": r.report,
+            "sources": r.sources,
+            "queries": r.queries,
+        })).into_response(),
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            e.to_string(),
+        ).into_response(),
+    }
+}
 ```
 
-- [ ] **Step 2: Verify it compiles**
+Replace with:
+```rust
+async fn research_json(
+    State(cfg): State<AppState>,
+    Json(req): Json<ResearchBody>,
+) -> Response {
+    use crate::researcher::progressive::maybe_disclose;
+    use crate::llm::client::LlmClient;
+
+    let summary_style = req.summary_style.clone().unwrap_or_else(|| "abstract".to_string());
+    let request = into_pipeline_request(req);
+    let result = run(&cfg, &request, |_| {}, None).await;
+    match result {
+        Ok(r) => {
+            let llm = LlmClient::new(&cfg);
+            match maybe_disclose(&llm, &request.topic, &r, &summary_style, cfg.progressive_disclosure_chars).await {
+                Ok(d) => (
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    d.into_string(),
+                ).into_response(),
+                Err(e) => {
+                    tracing::warn!("progressive disclosure failed: {e:#}");
+                    Json(serde_json::json!({
+                        "report": r.report,
+                        "sources": r.sources,
+                        "queries": r.queries,
+                    })).into_response()
+                }
+            }
+        }
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            e.to_string(),
+        ).into_response(),
+    }
+}
+```
+
+- [ ] **Step 3: cargo check**
 
 ```bash
-cd /home/marius/work/claude/researcher
-cargo check 2>&1
+cargo check
 ```
 
-Expected: no errors
-
-- [ ] **Step 3: Run all tests**
-
-```bash
-cd /home/marius/work/claude/researcher
-cargo test 2>&1
-```
-
-Expected: all tests pass
+Expected: no errors.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/marius/work/claude/researcher
-git add src/mcp_server.rs
-git commit -m "feat(disclosure): navigation guidance in server_instructions"
+git add src/server.rs
+git commit -m "feat: wire progressive disclosure into HTTP JSON endpoint"
 ```
 
 ---
 
-## Self-Review
+## Task 6: Release build + smoke tests
 
-**Spec coverage:**
-- ✅ Threshold gate (4000 chars) — Task 5
-- ✅ `DisclosureHint` with `summary_focus` + `include_sources` — Task 1
-- ✅ Caller-override via `disclosure_hint` on `ResearchInput` — Task 5
-- ✅ Planner-derived default via `classify_disclosure()` — Task 3
-- ✅ Save to `/tmp/researcher/<slug>-<ts>.md` — Task 2
-- ✅ TOC extraction with line numbers, h1–h3 only — Task 1
-- ✅ Focused LLM summary using `summary_focus` as lens — Task 4
-- ✅ `sources` omitted when `include_sources: false` — Task 4
-- ✅ `server_instructions` navigation block — Task 6
-- ✅ Inline fallback when disclosure fails — Task 5
+- [ ] **Step 1: Full release build**
 
-**Type consistency check:**
-- `DisclosureHint` defined in Task 1, used in Tasks 3, 4, 5 — consistent
-- `TocEntry { heading: String, line: usize }` — used in `extract_toc()` return and `DisclosedResult.toc` — consistent
-- `disclose(report, hint, llm, query, sources, queries_used)` — defined in Task 4, called in Task 5 — consistent
-- `classify_disclosure(topic, intent)` — defined in Task 3, called in Task 5 — consistent
-- `save_report(report, query)` — defined in Task 2, called in Task 4 — consistent
+```bash
+cargo build --release
+```
 
-**No placeholders found.**
+Expected: success (LTO takes 30–60s).
+
+- [ ] **Step 2: Run unit tests**
+
+```bash
+cargo test progressive
+```
+
+Expected: 5 tests pass.
+
+- [ ] **Step 3: Smoke — always-inline path**
+
+```bash
+PROGRESSIVE_DISCLOSURE_CHARS=999999 \
+LLM_BASE_URL=http://localhost:8080/v1 \
+SEARXNG_URL=http://localhost:4000 \
+./target/release/researcher --query "test" 2>/dev/null | head -5
+```
+
+Expected: JSON with `"report":` key (inline, unchanged behavior).
+
+- [ ] **Step 4: Smoke — forced progressive path**
+
+```bash
+PROGRESSIVE_DISCLOSURE_CHARS=1 \
+LLM_BASE_URL=http://localhost:8080/v1 \
+SEARXNG_URL=http://localhost:4000 \
+./target/release/researcher --query "rust ownership" 2>/dev/null | python3 -m json.tool | grep -E '"path"|"toc"|"word_count"'
+```
+
+Expected: `"path"`, `"toc"`, `"word_count"` keys present. Verify file on disk:
+```bash
+ls ~/.local/share/researcher/ | tail -3
+```
+
+- [ ] **Step 5: Rebuild MCP binary and restart**
+
+```bash
+cargo build --release --bin researcher-mcp
+```
+
+Then restart the MCP server in Claude Code: `/mcp` → restart, or restart the session.
