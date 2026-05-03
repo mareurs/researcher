@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::config::Config;
 
@@ -156,7 +156,8 @@ pub async fn stream(
 
 
     /// Send a non-streaming chat completion and return the assistant text.
-pub async fn complete(&self, messages: Vec<ChatMessage>) -> Result<String> {
+    /// Retries up to 3 times on transient errors (5xx, 429, network failures).
+    pub async fn complete(&self, messages: Vec<ChatMessage>) -> Result<String> {
         let url = format!("{}/chat/completions", self.base_url);
 
         let req = ChatRequest {
@@ -174,31 +175,53 @@ pub async fn complete(&self, messages: Vec<ChatMessage>) -> Result<String> {
 
         debug!(url, model = %self.model, disable_thinking = self.disable_thinking, "LLM request");
 
-        let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(&self.api_key)
-            .json(&req)
-            .send()
-            .await
-            .context("LLM HTTP request failed")?;
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 0u32..3 {
+            if attempt > 0 {
+                let delay = std::time::Duration::from_secs(1 << (attempt - 1)); // 1s, 2s
+                warn!(attempt, delay_secs = delay.as_secs(), "LLM transient error, retrying");
+                tokio::time::sleep(delay).await;
+            }
 
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("LLM error {status}: {body}");
+            let resp = match self
+                .http
+                .post(&url)
+                .bearer_auth(&self.api_key)
+                .json(&req)
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    last_err = Some(anyhow::anyhow!("LLM HTTP request failed: {e}"));
+                    continue;
+                }
+            };
+
+            let status = resp.status();
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                if status.is_server_error() || status.as_u16() == 429 {
+                    last_err = Some(anyhow::anyhow!("LLM error {status}: {body}"));
+                    continue;
+                }
+                // 4xx (except 429) won't self-resolve — bail immediately
+                anyhow::bail!("LLM error {status}: {body}");
+            }
+
+            let chat: ChatResponse = resp.json().await.context("LLM response parse")?;
+            let text = chat
+                .choices
+                .into_iter()
+                .next()
+                .map(|c| c.message.content)
+                .unwrap_or_default();
+
+            let text = text.trim().to_string();
+            return Ok(if self.strip_thinking { strip_thinking(&text) } else { text });
         }
 
-        let chat: ChatResponse = resp.json().await.context("LLM response parse")?;
-        let text = chat
-            .choices
-            .into_iter()
-            .next()
-            .map(|c| c.message.content)
-            .unwrap_or_default();
-
-        let text = text.trim().to_string();
-        Ok(if self.strip_thinking { strip_thinking(&text) } else { text })
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("LLM request failed after 3 attempts")))
     }
 }
 

@@ -1596,6 +1596,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "chrono",
  "clap",
  "eventsource-stream",
  "futures",
@@ -1605,6 +1606,7 @@ dependencies = [
  "scraper",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
