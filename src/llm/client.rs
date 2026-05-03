@@ -44,7 +44,8 @@ struct Choice {
 
 #[derive(Debug, Deserialize)]
 struct MessageContent {
-    content: String,
+    #[serde(default)]
+    content: Option<String>,
 }
 
 /// Thin OpenAI-compatible client. Works against llama.cpp server, vLLM,
@@ -214,7 +215,7 @@ pub async fn stream(
                 .choices
                 .into_iter()
                 .next()
-                .map(|c| c.message.content)
+                .and_then(|c| c.message.content)
                 .unwrap_or_default();
 
             let text = text.trim().to_string();
