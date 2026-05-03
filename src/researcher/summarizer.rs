@@ -24,8 +24,7 @@ struct JudgedSummary {
 async fn summarize_source(llm: &LlmClient, source: &ScrapedSource, topic: &str) -> Result<Option<SourceSummary>> {
     let messages = vec![
         ChatMessage::system(
-            "/no_think\n\
-             You are a research analyst. Summarize web page content that is useful for a research question.\n\n\
+            "You are a research analyst. Summarize web page content that is useful for a research question.\n\n\
              Return JSON with exactly these fields:\n\
              {\"relevant\": true/false, \"confidence\": 0.0-1.0, \"summary\": \"...\"}\n\n\
              Set relevant=true if the content provides ANY useful information related to the research topic — \

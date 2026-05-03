@@ -28,8 +28,12 @@ struct ChatRequest {
     max_tokens: u32,
     temperature: f32,
     stream: bool,
+    /// Qwen3 (llama.cpp): {"enable_thinking": false} disables thinking
     #[serde(skip_serializing_if = "Option::is_none")]
     chat_template_kwargs: Option<serde_json::Value>,
+    /// Gemini OpenAI-compat: {"google":{"thinking_config":{"thinking_budget":0}}} disables thinking
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra_body: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,7 +85,7 @@ pub fn new(cfg: &Config) -> Self {
             max_tokens: cfg.llm_max_tokens,
             temperature: cfg.llm_temperature,
             strip_thinking: cfg.strip_thinking_tokens,
-            disable_thinking: false,
+            disable_thinking: true,
         }
     }
 
@@ -127,7 +131,7 @@ pub fn new(cfg: &Config) -> Self {
             max_tokens,
             temperature: cfg.llm_temperature,
             strip_thinking: cfg.strip_thinking_tokens,
-            disable_thinking: use_fast,
+            disable_thinking: true,
         }
     }
 
@@ -161,14 +165,21 @@ pub async fn stream(
     pub async fn complete(&self, messages: Vec<ChatMessage>) -> Result<String> {
         let url = format!("{}/chat/completions", self.base_url);
 
+        let is_gemini = self.base_url.contains("googleapis.com");
+
         let req = ChatRequest {
             model: self.model.clone(),
             messages,
             max_tokens: self.max_tokens,
             temperature: self.temperature,
             stream: false,
-            chat_template_kwargs: if self.disable_thinking {
+            chat_template_kwargs: if self.disable_thinking && !is_gemini {
                 Some(json!({"enable_thinking": false}))
+            } else {
+                None
+            },
+            extra_body: if self.disable_thinking && is_gemini {
+                Some(json!({"google":{"thinking_config":{"thinking_budget":0}}}))
             } else {
                 None
             },
