@@ -317,7 +317,7 @@ pub async fn run(
                     ranked.into_iter().map(|r| r.source).collect()
                 }
                 Err(e) => {
-                    tracing::warn!(%e, "cross-encoder rerank failed, using dedup order");
+                    tracing::error!(%e, "rerank service failed, falling back to dedup order");
                     on_progress(ProgressEvent::CrawlComplete { sources: fallback.len() });
                     fallback
                 }

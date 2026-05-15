@@ -34,7 +34,7 @@ pub async fn deduplicate(
     let embeddings = match client.embed(&texts).await {
         Ok(e) => e,
         Err(err) => {
-            tracing::warn!(%err, "embed failed, skipping dedup");
+            tracing::error!(%err, "embed service failed, skipping dedup");
             return sources;
         }
     };
