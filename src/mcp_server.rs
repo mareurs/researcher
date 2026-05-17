@@ -380,6 +380,10 @@ pub struct ResearchInput {
 
     #[schemars(description = "[code] keyword to narrow search within the framework")]
     pub keywords: Option<String>,
+
+    #[schemars(description = "If true, bypass progressive disclosure and return raw JSON ResearchResult {report, sources, queries}. Default false.")]
+    #[serde(default)]
+    pub raw_json: Option<bool>,
 }
 
 
@@ -466,6 +470,9 @@ async fn dispatch_topic(cfg: std::sync::Arc<Config>, input: ResearchInput) -> St
 
     match run(cfg_use, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
         Ok(r) => {
+            if input.raw_json.unwrap_or(false) {
+                return serde_json::to_string(&r).unwrap_or_else(|e| format!("Error serializing result: {e}"));
+            }
             let llm = LlmClient::new(cfg_use);
             let style = input.summary_style.as_deref().unwrap_or("abstract");
             match maybe_disclose(&llm, &request.topic, &r, style, cfg_use.progressive_disclosure_chars).await {
@@ -500,6 +507,9 @@ async fn dispatch_person(cfg: std::sync::Arc<Config>, input: ResearchInput) -> S
 
     match run(&cfg, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
         Ok(r) => {
+            if input.raw_json.unwrap_or(false) {
+                return serde_json::to_string(&r).unwrap_or_else(|e| format!("Error serializing result: {e}"));
+            }
             let llm = LlmClient::new(&cfg);
             let style = input.summary_style.as_deref().unwrap_or("abstract");
             match maybe_disclose(&llm, &request.topic, &r, style, cfg.progressive_disclosure_chars).await {
@@ -534,6 +544,9 @@ async fn dispatch_company(cfg: std::sync::Arc<Config>, input: ResearchInput) -> 
 
     match run(&cfg, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
         Ok(r) => {
+            if input.raw_json.unwrap_or(false) {
+                return serde_json::to_string(&r).unwrap_or_else(|e| format!("Error serializing result: {e}"));
+            }
             let llm = LlmClient::new(&cfg);
             let style = input.summary_style.as_deref().unwrap_or("abstract");
             match maybe_disclose(&llm, &request.topic, &r, style, cfg.progressive_disclosure_chars).await {
@@ -578,6 +591,9 @@ async fn dispatch_market(cfg: std::sync::Arc<Config>, input: ResearchInput) -> S
 
     match run(&cfg, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
         Ok(r) => {
+            if input.raw_json.unwrap_or(false) {
+                return serde_json::to_string(&r).unwrap_or_else(|e| format!("Error serializing result: {e}"));
+            }
             let llm = LlmClient::new(&cfg);
             let style = input.summary_style.as_deref().unwrap_or("abstract");
             match maybe_disclose(&llm, &request.topic, &r, style, cfg.progressive_disclosure_chars).await {
@@ -659,6 +675,9 @@ async fn dispatch_code(cfg: std::sync::Arc<Config>, input: ResearchInput) -> Str
                 sources: vec![],
                 queries,
             };
+            if input.raw_json.unwrap_or(false) {
+                return serde_json::to_string(&result).unwrap_or_else(|e| format!("Error serializing result: {e}"));
+            }
             match maybe_disclose(&llm, &framework, &result, style, cfg.progressive_disclosure_chars).await {
                 Ok(d)  => d.into_string(),
                 Err(e) => {
