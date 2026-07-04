@@ -139,7 +139,9 @@ services:
       - ai-infra-net
     ports:
       - "30082:80"
-    command: --model-id BAAI/bge-large-en-v1.5 --port 80 --auto-truncate --max-concurrent-requests 32
+    command: --model-id BAAI/bge-large-en-v1.5 --port 80 --auto-truncate --max-concurrent-requests 32 --num-threads 4
+    environment:
+      - HF_HUB_OFFLINE=1
     volumes:
       - tei-embed-cache:/data
     healthcheck:
@@ -159,7 +161,9 @@ services:
       - ai-infra-net
     ports:
       - "30083:80"
-    command: --model-id cross-encoder/ms-marco-MiniLM-L-6-v2 --port 80 --auto-truncate --max-concurrent-requests 32
+    command: --model-id cross-encoder/ms-marco-MiniLM-L-6-v2 --port 80 --auto-truncate --max-concurrent-requests 32 --num-threads 4
+    environment:
+      - HF_HUB_OFFLINE=1
     volumes:
       - tei-rerank-cache:/data
     healthcheck:

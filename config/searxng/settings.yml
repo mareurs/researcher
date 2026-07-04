@@ -47,6 +47,12 @@ engines:
     engine: bing
     shortcut: bi
     disabled: false
+  # Brave Search API — no rate limits, no CAPTCHAs
+  - name: braveapi
+    engine: braveapi
+    shortcut: brapi
+    api_key: REPLACE_WITH_BRAVE_API_KEY
+    disabled: false
   - name: wikipedia
     engine: wikipedia
     shortcut: wp

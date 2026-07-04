@@ -45,11 +45,10 @@ tokio-stream = "0.1"
 eventsource-stream = "0.2"
 
 # MCP server
-rmcp = { version = "1.5", features = ["server", "transport-io", "macros"] }
+rmcp = { version = "1.1", features = ["server", "transport-io", "macros"] }
 
 # Utilities
 anyhow = "1"
-chrono = "0.4"
 urlencoding = "2"
 thiserror = "2"
 url = "2"
@@ -57,10 +56,6 @@ regex = "1"
 
 [profile.release]
 opt-level = 3
-lto = "fat"
+lto = true
 codegen-units = 1
-strip = "symbols"
-panic = "abort"
-
-[dev-dependencies]
-tempfile = "3"
+strip = true

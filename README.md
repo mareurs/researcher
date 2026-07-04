@@ -8,9 +8,6 @@ query → planner (LLM) → search+scrape×N → quality filter → dedup → re
 
 **Why Rust?** No GIL — true parallel scraping, concurrent LLM summarization, ~5MB static binary, zero LangChain.
 
-> **Recommended backend:** `gemini-2.5-flash` via the Google AI OpenAI-compatible endpoint. Local LLM stacks (llama.cpp + quantized models) work but produce noticeably weaker results — small cloud models consistently outperform local quantized models for this pipeline's multi-stage workload.
-
-
 ## Features
 
 - **Multi-stage pipeline** — LLM-driven query planning, parallel web crawling, concurrent summarization, final report synthesis
@@ -145,42 +142,32 @@ LLM_API_KEY=ollama
 LLM_FAST_BASE_URL=   # empty = same model for all stages
 ```
 
-### Option E — Google Gemini Flash (recommended)
-
-No GPU required. Gemini Flash is fast, cheap, and outperforms local quantized models on this pipeline.
-
-Get a free API key at [aistudio.google.com](https://aistudio.google.com), then:
+### Option E — Vertex AI (ADC auth)
 
 ```bash
 cp .env.example .env
+# Edit .env:
+#   LLM_PROVIDER=vertex
+#   LLM_MODEL=gemini-2.5-flash
+#   VERTEX_PROJECT=sp-mrv-gemini-dev
+#   VERTEX_LOCATION=eu
+#   LLM_BASE_URL=https://aiplatform.googleapis.com/v1beta1
+#   LLM_FAST_PROVIDER=vertex   # optional; empty = inherit primary provider
 ```
 
-Edit `.env`:
-
-```env
-LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-LLM_MODEL=gemini-2.5-flash
-LLM_API_KEY=AIzaSy...          # your Google AI Studio key
-LLM_MAX_TOKENS=8192
-STRIP_THINKING_TOKENS=false    # not needed for Gemini
-
-# Fast model (same endpoint — leave blank to reuse LLM_MODEL for all stages)
-LLM_FAST_BASE_URL=
-LLM_FAST_MODEL=
-
-# SearXNG (bundled in infra stack)
-SEARXNG_URL=http://localhost:4000
-```
+Authenticate locally:
 
 ```bash
-# Start infra (SearXNG only — no llama.cpp needed)
-make infra-up
-make up
-
-curl -X POST http://localhost:33100/research \
-  -H 'Content-Type: application/json' \
-  -d '{"query": "What are the latest advances in fusion energy?"}'
+gcloud auth application-default login
 ```
+
+Then run:
+
+```bash
+make infra-up   # for SearXNG / optional TEI services
+make up
+```
+
 ## MCP Server
 
 `researcher-mcp` exposes the full pipeline as MCP tools over stdio. Use with Claude Desktop, Claude Code, or any MCP client.
@@ -218,17 +205,14 @@ cargo build --release --bin researcher-mcp
     "researcher": {
       "command": "/path/to/researcher-mcp",
       "env": {
-        "LLM_BASE_URL": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "LLM_MODEL": "gemini-2.5-flash",
-        "LLM_API_KEY": "AIzaSy...",
-        "LLM_MAX_TOKENS": "8192",
-        "STRIP_THINKING_TOKENS": "false",
+        "LLM_BASE_URL": "http://localhost:8080/v1",
         "SEARXNG_URL": "http://localhost:4000"
       }
     }
   }
 }
 ```
+
 ### MCP Tools
 
 | Tool | Parameters | Description |
@@ -303,12 +287,15 @@ All settings are environment variables. Copy `.env.example` to `.env` and edit.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_BASE_URL` | `http://localhost:8080/v1` | Any OpenAI-compatible endpoint |
+| `LLM_PROVIDER` | `openai` | `openai` or `vertex` |
+| `LLM_BASE_URL` | `http://localhost:8080/v1` | Any OpenAI-compatible endpoint; for Vertex use `https://aiplatform.googleapis.com/v1beta1` |
 | `LLM_MODEL` | `Qwen3.5-4B-Q4_K_M` | Model name sent in requests |
-| `LLM_API_KEY` | `no-key-needed` | Set to `sk-...` for OpenAI |
+| `LLM_API_KEY` | `no-key-needed` | Set to `sk-...` for OpenAI-compatible providers; ignored for Vertex |
 | `LLM_MAX_TOKENS` | `4096` | Max tokens per LLM call |
 | `LLM_TEMPERATURE` | `0.3` | Generation temperature |
 | `STRIP_THINKING_TOKENS` | `true` | Strip `<think>...</think>` from Qwen3 responses |
+| `VERTEX_PROJECT` | `` | Required when `LLM_PROVIDER=vertex` |
+| `VERTEX_LOCATION` | `us-central1` | Vertex AI region |
 
 ### Dual-model routing (optional)
 
@@ -318,6 +305,7 @@ Route different pipeline stages to a second model backend. Leave `LLM_FAST_BASE_
 |----------|---------|-------------|
 | `LLM_FAST_BASE_URL` | `` (disabled) | Fast LLM endpoint; empty = use heavy backend |
 | `LLM_FAST_MODEL` | `Qwen3.5-4B-Q4_K_M` | Model name for fast LLM |
+| `LLM_FAST_PROVIDER` | `` | Fast provider override; empty = inherit `LLM_PROVIDER` |
 | `LLM_FAST_API_KEY` | `` | Fast LLM API key; empty = inherit `LLM_API_KEY` |
 | `LLM_FAST_MAX_TOKENS` | `4096` | Max tokens for fast model |
 | `LLM_FAST_STAGES` | `planner,summarizer,publisher` | Pipeline stages routed to fast LLM |
@@ -499,25 +487,21 @@ docker build -t researcher .
 | **vLLM** | `http://localhost:8000/v1` | Best for multi-user / high concurrency |
 | **LM Studio** | `http://localhost:1234/v1` | Desktop GUI for local models |
 | **OpenAI** | `https://api.openai.com/v1` | Set `LLM_API_KEY=sk-...` |
-| **Google Gemini** | `https://generativelanguage.googleapis.com/v1beta/openai/` | Set `LLM_API_KEY=AIza...`, model e.g. `gemini-2.5-flash` |
+| **Google Gemini** | `https://generativelanguage.googleapis.com/v1beta/openai/` | Set `LLM_API_KEY=AIza...`, model e.g. `gemini-2.0-flash` |
+| **Vertex AI** | `https://aiplatform.googleapis.com/v1beta1` | Set `LLM_PROVIDER=vertex`, `VERTEX_PROJECT`, `VERTEX_LOCATION`; authenticate with ADC |
 | **Anthropic** | Use [LiteLLM](https://github.com/BerriAI/litellm) proxy | OpenAI-compatible wrapper |
-
 ## Recommended Models
 
-`gemini-2.5-flash` is the recommended model — no GPU required, free tier available, and it consistently outperforms local quantized models on this pipeline's multi-stage workload (planning, parallel summarization, report synthesis).
+`Qwen3.5-4B-Q4_K_M` is the recommended model — it runs on ~3GB VRAM and produces excellent research reports.
 
-> **Note on local LLMs:** Running llama.cpp with quantized Qwen models works but results are noticeably weaker. The pipeline makes many concurrent LLM calls and small quantized models struggle with instruction following across all stages. Cloud models handle this much better.
+| Model | VRAM | Notes |
+|-------|------|-------|
+| `Qwen3.5-4B-Q4_K_M` | ~3GB | Recommended — fast, high quality |
+| `Qwen3.5-9B-Q4_K_M` | ~6GB | Larger, marginal gains for most queries |
+| `gpt-4.1-mini` | — | Cloud alternative |
 
-| Model | Backend | Notes |
-|-------|---------|-------|
-| `gemini-2.5-flash` | Google AI | **Recommended** — fast, cheap, excellent quality |
-| `gemini-2.5-flash-lite` | Google AI | Cheaper, slightly lower quality |
-| `gemini-3.1-flash-lite-preview` | Google AI | Newest, preview only — may change |
-| `gpt-4.1-mini` | OpenAI | Solid cloud alternative |
-| `Qwen3.5-4B-Q4_K_M` | llama.cpp / Ollama | Local option — ~3GB VRAM, results vary |
-| `Qwen3.5-9B-Q4_K_M` | llama.cpp | Local option — ~6GB VRAM, marginal improvement |
+Set `STRIP_THINKING_TOKENS=true` for all Qwen3 models to strip internal `<think>` tokens from responses.
 
-Set `STRIP_THINKING_TOKENS=true` when using Qwen3 models to strip internal `<think>` tokens from responses.
 ## License
 
 MIT

@@ -7,9 +7,7 @@
 #   make infra-up
 #
 # Quick start:
-#   docker compose --profile server up -d   # HTTP server container (not needed for MCP usage)
-#
-# MCP usage: binary runs on host, only needs infra stack (searxng/tei) — no container here.
+#   docker compose up -d
 
 networks:
   ai-infra-net:
@@ -17,7 +15,6 @@ networks:
 
 services:
   researcher:
-    profiles: ["server"]
     build:
       context: .
       dockerfile: Dockerfile

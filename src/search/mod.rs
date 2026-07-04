@@ -6,7 +6,7 @@ pub mod tavily;
 
 use anyhow::Result;
 use reqwest::Client;
-use tracing::{error, warn};
+use tracing::warn;
 
 pub use searxng::SearchResult;
 
@@ -51,21 +51,21 @@ pub async fn search_with_fallback(
             match tavily::search(http, tavily_api_key, domains, &clean_query, num_results).await {
                 Ok(results) if !results.is_empty() => return Ok(results),
                 Ok(_) => warn!(%query, "Tavily returned empty results, falling back"),
-                Err(e) => error!(%e, %query, "Tavily failed, falling back"),
+                Err(e) => warn!(%e, %query, "Tavily failed, falling back"),
             }
         }
         Some("academic") if !exa_api_key.is_empty() => {
             match exa::search(http, exa_api_key, domains, &clean_query, num_results).await {
                 Ok(results) if !results.is_empty() => return Ok(results),
                 Ok(_) => warn!(%query, "Exa returned empty results, falling back"),
-                Err(e) => error!(%e, %query, "Exa failed, falling back"),
+                Err(e) => warn!(%e, %query, "Exa failed, falling back"),
             }
         }
         _ if !brave_api_key.is_empty() => {
             match brave::search(http, brave_api_key, query, num_results).await {
                 Ok(results) if !results.is_empty() => return Ok(results),
                 Ok(_) => warn!(%query, "Brave returned empty results, falling back"),
-                Err(e) => error!(%e, %query, "Brave failed, falling back"),
+                Err(e) => warn!(%e, %query, "Brave failed, falling back"),
             }
         }
         _ => {}
@@ -75,7 +75,7 @@ pub async fn search_with_fallback(
     match searxng::search(http, searxng_url, query, num_results).await {
         Ok(results) if !results.is_empty() => return Ok(results),
         Ok(_) => warn!(%query, "SearXNG returned empty results"),
-        Err(e) => error!(%e, %query, "SearXNG failed"),
+        Err(e) => warn!(%e, %query, "SearXNG failed"),
     }
 
     // 3. DuckDuckGo

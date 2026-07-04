@@ -211,7 +211,7 @@ pub async fn generate_queries(
     };
 
     let messages = vec![
-        ChatMessage::system(format!("{}{system_prompt}", intent_prefix(intent))),
+        ChatMessage::system(format!("/no_think\n{}{system_prompt}", intent_prefix(intent))),
         ChatMessage::user(format!(
             "Research topic: {display_topic}\n\n\
              Generate exactly {max_queries} distinct search queries to research this topic \
@@ -274,7 +274,8 @@ pub async fn broaden_queries(
 
     let messages = vec![
         ChatMessage::system(format!(
-            "You are a research planning assistant. The current year is 2026.\n\
+            "/no_think\n\
+             You are a research planning assistant. The current year is 2026.\n\
              Your job is to reformulate failed search queries into broader, more general alternatives \
              that are more likely to find relevant content.\n\
              Rules for broadening:\n\

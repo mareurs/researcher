@@ -1,7 +1,7 @@
 use anyhow::Result;
 use futures::future::join_all;
 use reqwest::Client;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 use crate::config::Config;
 use crate::scraper::html::fetch_and_extract;
@@ -103,7 +103,7 @@ pub async fn crawl_query(
     )
     .await
     .unwrap_or_else(|e| {
-        error!(%e, %query, "all search backends failed");
+        warn!(%e, %query, "all search backends failed");
         vec![]
     });
 
@@ -239,7 +239,7 @@ pub async fn crawl_all(
     for query in queries {
         match crawl_query(http, cfg, query, &mut visited).await {
             Ok(sources) => all_sources.extend(sources),
-            Err(e) => error!(%e, %query, "crawl_query failed"),
+            Err(e) => warn!(%e, %query, "crawl_query failed"),
         }
     }
 

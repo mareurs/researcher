@@ -30,13 +30,3 @@ kedos-srl-review.md
 
 # Internal AI-assisted planning docs (superpowers scaffolding)
 docs/superpowers/
-
-# Tooling state — not project artifacts
-.buddy/
-.fastembed_cache/
-.codescout/cc_session_id
-.codescout/debug.log*
-.codescout/diagnostic-*.log
-.codescout/embeddings/
-.codescout/libraries.json
-.codescout/write.lock

@@ -1,3 +1,18 @@
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LlmProvider {
+    OpenAi,
+    Vertex,
+}
+
+impl LlmProvider {
+    pub fn parse(raw: &str) -> Self {
+        match raw.trim().to_lowercase().as_str() {
+            "vertex" => Self::Vertex,
+            _ => Self::OpenAi,
+        }
+    }
+}
+
 use clap::Parser;
 
 #[derive(Debug, Clone, Default)]
@@ -51,6 +66,10 @@ pub struct Config {
     #[arg(long, env = "LLM_MODEL", default_value = "Qwen_Qwen3.5-9B-Q4_K_M")]
     pub llm_model: String,
 
+    /// Provider for the primary LLM backend: openai | vertex
+    #[arg(long, env = "LLM_PROVIDER", default_value = "openai")]
+    pub llm_provider: String,
+
     /// API key (use "no-key-needed" for local servers)
     #[arg(long, env = "LLM_API_KEY", default_value = "no-key-needed")]
     pub llm_api_key: String,
@@ -78,6 +97,10 @@ pub struct Config {
     #[arg(long, env = "LLM_FAST_MODEL", default_value = "Qwen3.5-4B-Q4_K_M")]
     pub llm_fast_model: String,
 
+    /// Provider for the fast LLM backend. Empty = inherit `LLM_PROVIDER`.
+    #[arg(long, env = "LLM_FAST_PROVIDER", default_value = "")]
+    pub llm_fast_provider: String,
+
     /// API key for the fast LLM backend. Empty = fall back to LLM_API_KEY.
     #[arg(long, env = "LLM_FAST_API_KEY", default_value = "")]
     pub llm_fast_api_key: String,
@@ -99,6 +122,14 @@ pub struct Config {
     /// Number of search results to fetch per sub-question
     #[arg(long, env = "SEARCH_RESULTS_PER_QUERY", default_value = "8")]
     pub search_results_per_query: usize,
+
+    /// Vertex AI project id (required when provider is `vertex`)
+    #[arg(long, env = "VERTEX_PROJECT", default_value = "")]
+    pub vertex_project: String,
+
+    /// Vertex AI location/region
+    #[arg(long, env = "VERTEX_LOCATION", default_value = "us-central1")]
+    pub vertex_location: String,
 
     /// Brave Search API key (empty = disabled)
     #[arg(long, env = "BRAVE_API_KEY", default_value = "")]
@@ -193,11 +224,6 @@ pub struct Config {
     /// Job search profile loaded from profiles.toml [job-profile]. Not a CLI flag.
     #[clap(skip)]
     pub job_profile: Option<JobProfile>,
-
-    /// Char length above which MCP tools save the report to disk and return a compact envelope.
-    /// Set to 0 to always return inline (disables feature).
-    #[arg(long, env = "PROGRESSIVE_DISCLOSURE_CHARS", default_value = "4000")]
-    pub progressive_disclosure_chars: usize,
 }
 
 /// User profile for job search, loaded from the `[job-profile]` section of `profiles.toml`.
@@ -264,4 +290,22 @@ pub fn load_profiles() -> std::collections::HashMap<String, Vec<String>> {
         }
     }
     profiles
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LlmProvider;
+
+    #[test]
+    fn llm_provider_defaults_to_openai_for_unknown_values() {
+        assert_eq!(LlmProvider::parse("openai"), LlmProvider::OpenAi);
+        assert_eq!(LlmProvider::parse("OPENAI"), LlmProvider::OpenAi);
+        assert_eq!(LlmProvider::parse("something-else"), LlmProvider::OpenAi);
+    }
+
+    #[test]
+    fn llm_provider_parses_vertex_case_insensitively() {
+        assert_eq!(LlmProvider::parse("vertex"), LlmProvider::Vertex);
+        assert_eq!(LlmProvider::parse(" Vertex "), LlmProvider::Vertex);
+    }
 }
