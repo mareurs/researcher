@@ -1,9 +1,5 @@
 //! Low-level Langfuse ingestion client and pure event builders.
 //! Adapted from llm-proxy/src/langfuse.rs, extended for nested spans.
-//!
-//! Not yet wired into the pipeline (that lands in Task 3), so nothing outside
-//! `#[cfg(test)]` calls these items yet — silence dead_code until then.
-#![allow(dead_code)]
 
 use chrono::{DateTime, Utc};
 use reqwest::Client;
@@ -194,6 +190,7 @@ pub fn generation_create(gen: &GenerationLog) -> Value {
 }
 
 /// score-create event. Unused in v1 (the hook for the Phase-2 LLM judge).
+#[allow(dead_code)]
 pub fn score_create(trace_id: &str, name: &str, value: f64, comment: Option<&str>, ts_ms: u128) -> Value {
     let mut body = json!({ "traceId": trace_id, "name": name, "value": value });
     if let Some(c) = comment {

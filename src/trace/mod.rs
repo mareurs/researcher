@@ -1,10 +1,5 @@
 //! Langfuse tracing for the research pipeline.
 //! `langfuse` = wire layer (client + event builders); `ResearchTrace` = run-scoped façade.
-//!
-//! `ResearchTrace` is not yet wired into `run()` (that lands in Task 5), so nothing
-//! outside `#[cfg(test)]` calls these items yet — silence dead_code until then.
-// TODO(task-5): remove once run() wires ResearchTrace
-#![allow(dead_code)]
 
 pub mod langfuse;
 

@@ -178,8 +178,6 @@ impl LlmClient {
     }
 
     /// Attach a trace sink (called once in `run()` after construction).
-    // TODO(task-5): remove once run() wires with_trace/under into the pipeline.
-    #[allow(dead_code)]
     pub fn with_trace(mut self, trace: Option<crate::trace::ResearchTrace>) -> Self {
         self.trace = trace;
         self
@@ -187,8 +185,6 @@ impl LlmClient {
 
     /// Cheap clone scoping this client's LLM calls to a parent span + generation name.
     /// No-op semantics preserved when the client has no trace.
-    // TODO(task-5): remove once run() wires with_trace/under into the pipeline.
-    #[allow(dead_code)]
     pub fn under(&self, span_id: &str, name: &str) -> LlmClient {
         let mut c = self.clone();
         c.gen_parent = Some(span_id.to_string());
