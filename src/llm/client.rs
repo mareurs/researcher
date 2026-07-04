@@ -14,10 +14,16 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: "system".into(), content: content.into() }
+        Self {
+            role: "system".into(),
+            content: content.into(),
+        }
     }
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: "user".into(), content: content.into() }
+        Self {
+            role: "user".into(),
+            content: content.into(),
+        }
     }
 }
 
@@ -119,76 +125,76 @@ impl LlmClient {
 
     /// Build a client for the fast/lightweight LLM backend.
     /// Falls back to the heavy backend if `LLM_FAST_BASE_URL` is empty.
-        pub fn new_fast(cfg: &Config) -> Self {
-            let use_fast = !cfg.llm_fast_base_url.is_empty() || !cfg.llm_fast_provider.is_empty();
-            let provider = resolved_fast_provider(cfg, use_fast);
+    pub fn new_fast(cfg: &Config) -> Self {
+        let use_fast = !cfg.llm_fast_base_url.is_empty() || !cfg.llm_fast_provider.is_empty();
+        let provider = resolved_fast_provider(cfg, use_fast);
 
-            let base_url = if use_fast && !cfg.llm_fast_base_url.is_empty() {
-                resolve_base_url(&provider, &cfg.llm_fast_base_url)
-            } else {
-                resolve_base_url(&provider, &cfg.llm_base_url)
-            };
+        let base_url = if use_fast && !cfg.llm_fast_base_url.is_empty() {
+            resolve_base_url(&provider, &cfg.llm_fast_base_url)
+        } else {
+            resolve_base_url(&provider, &cfg.llm_base_url)
+        };
 
-            let api_key = if use_fast && !cfg.llm_fast_api_key.is_empty() {
-                cfg.llm_fast_api_key.clone()
-            } else {
-                cfg.llm_api_key.clone()
-            };
+        let api_key = if use_fast && !cfg.llm_fast_api_key.is_empty() {
+            cfg.llm_fast_api_key.clone()
+        } else {
+            cfg.llm_api_key.clone()
+        };
 
-            let (model, max_tokens) = if use_fast {
-                (cfg.llm_fast_model.clone(), cfg.llm_fast_max_tokens)
-            } else {
-                (cfg.llm_model.clone(), cfg.llm_max_tokens)
-            };
+        let (model, max_tokens) = if use_fast {
+            (cfg.llm_fast_model.clone(), cfg.llm_fast_max_tokens)
+        } else {
+            (cfg.llm_model.clone(), cfg.llm_max_tokens)
+        };
 
-            info!(
-                backend = if use_fast { "fast" } else { "heavy (fallback)" },
-                provider = ?provider,
-                url = %base_url,
-                model = %model,
-                disable_thinking = use_fast,
-                "LlmClient::new_fast"
-            );
+        info!(
+            backend = if use_fast { "fast" } else { "heavy (fallback)" },
+            provider = ?provider,
+            url = %base_url,
+            model = %model,
+            disable_thinking = use_fast,
+            "LlmClient::new_fast"
+        );
 
-            Self {
-                http: Client::builder()
-                    .timeout(std::time::Duration::from_secs(120))
-                    .build()
-                    .expect("HTTP client"),
-                provider,
-                base_url,
-                api_key,
-                model,
-                max_tokens,
-                temperature: cfg.llm_temperature,
-                strip_thinking: cfg.strip_thinking_tokens,
-                disable_thinking: use_fast,
-                vertex_project: cfg.vertex_project.clone(),
-                vertex_location: cfg.vertex_location.clone(),
-                trace: None,
-                gen_parent: None,
-                gen_name: None,
-            }
+        Self {
+            http: Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .expect("HTTP client"),
+            provider,
+            base_url,
+            api_key,
+            model,
+            max_tokens,
+            temperature: cfg.llm_temperature,
+            strip_thinking: cfg.strip_thinking_tokens,
+            disable_thinking: use_fast,
+            vertex_project: cfg.vertex_project.clone(),
+            vertex_location: cfg.vertex_location.clone(),
+            trace: None,
+            gen_parent: None,
+            gen_name: None,
         }
+    }
 
     /// Attach a trace sink (called once in `run()` after construction).
     // TODO(task-5): remove once run() wires with_trace/under into the pipeline.
     #[allow(dead_code)]
     pub fn with_trace(mut self, trace: Option<crate::trace::ResearchTrace>) -> Self {
-            self.trace = trace;
-            self
-        }
+        self.trace = trace;
+        self
+    }
 
     /// Cheap clone scoping this client's LLM calls to a parent span + generation name.
     /// No-op semantics preserved when the client has no trace.
     // TODO(task-5): remove once run() wires with_trace/under into the pipeline.
     #[allow(dead_code)]
     pub fn under(&self, span_id: &str, name: &str) -> LlmClient {
-            let mut c = self.clone();
-            c.gen_parent = Some(span_id.to_string());
-            c.gen_name = Some(name.to_string());
-            c
-        }
+        let mut c = self.clone();
+        c.gen_parent = Some(span_id.to_string());
+        c.gen_name = Some(name.to_string());
+        c
+    }
 
     fn ensure_vertex_ready(&self) -> Result<()> {
         if self.provider == LlmProvider::Vertex && self.vertex_project.trim().is_empty() {
@@ -200,190 +206,213 @@ impl LlmClient {
     /// Stream completion tokens to `tx`, accumulate and return the full text.
     /// Emits a Langfuse generation (timing + I/O) when trace-scoped. Token usage
     /// and TTFT for the streaming path are captured in a later phase (see roadmap T-13).
-        pub async fn stream(
-            &self,
-            messages: Vec<ChatMessage>,
-            tx: tokio::sync::mpsc::Sender<String>,
-        ) -> Result<String> {
-            self.ensure_vertex_ready()?;
+    pub async fn stream(
+        &self,
+        messages: Vec<ChatMessage>,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<String> {
+        self.ensure_vertex_ready()?;
 
-            let traced = self.trace.is_some() && self.gen_parent.is_some() && self.gen_name.is_some();
-            let start_ms = crate::trace::now_ms();
-            let input_json = if traced {
-                serde_json::to_value(&messages).unwrap_or(serde_json::Value::Null)
-            } else {
-                serde_json::Value::Null
-            };
+        let traced = self.trace.is_some() && self.gen_parent.is_some() && self.gen_name.is_some();
+        let start_ms = crate::trace::now_ms();
+        let input_json = if traced {
+            serde_json::to_value(&messages).unwrap_or(serde_json::Value::Null)
+        } else {
+            serde_json::Value::Null
+        };
 
-            let http = Client::builder()
-                .timeout(std::time::Duration::from_secs(180))
-                .build()?;
+        let http = Client::builder()
+            .timeout(std::time::Duration::from_secs(180))
+            .build()?;
 
-            let text = match self.provider {
-                LlmProvider::OpenAi => {
-                    crate::llm::stream::stream_completion(
-                        &http,
-                        &self.base_url,
-                        &self.api_key,
-                        &self.model,
-                        self.max_tokens,
-                        self.temperature,
-                        self.strip_thinking,
-                        messages,
-                        tx,
-                    )
-                    .await?
+        let text = match self.provider {
+            LlmProvider::OpenAi => {
+                crate::llm::stream::stream_completion(
+                    &http,
+                    &self.base_url,
+                    &self.api_key,
+                    &self.model,
+                    self.max_tokens,
+                    self.temperature,
+                    self.strip_thinking,
+                    messages,
+                    tx,
+                )
+                .await?
+            }
+            LlmProvider::Vertex => {
+                let text = crate::llm::vertex::stream(
+                    &http,
+                    &self.base_url,
+                    &self.vertex_project,
+                    &self.vertex_location,
+                    &self.model,
+                    self.max_tokens,
+                    self.temperature,
+                    messages,
+                    tx,
+                )
+                .await?;
+                if self.strip_thinking {
+                    strip_thinking(&text)
+                } else {
+                    text
                 }
-                LlmProvider::Vertex => {
-                    let text = crate::llm::vertex::stream(
-                        &http,
-                        &self.base_url,
-                        &self.vertex_project,
-                        &self.vertex_location,
-                        &self.model,
-                        self.max_tokens,
-                        self.temperature,
-                        messages,
-                        tx,
-                    )
-                    .await?;
-                    if self.strip_thinking { strip_thinking(&text) } else { text }
-                }
-            };
+            }
+        };
 
-            self.emit_generation(start_ms, None, 0, 0, input_json, &text);
-            Ok(text)
-        }
+        self.emit_generation(start_ms, None, 0, 0, input_json, &text);
+        Ok(text)
+    }
 
     /// Send a non-streaming chat completion and return the assistant text.
     /// Retries up to 3 times on transient errors (5xx, 429, network failures).
     /// Emits a Langfuse generation when the client is trace-scoped.
-        pub async fn complete(&self, messages: Vec<ChatMessage>) -> Result<String> {
-            self.ensure_vertex_ready()?;
+    pub async fn complete(&self, messages: Vec<ChatMessage>) -> Result<String> {
+        self.ensure_vertex_ready()?;
 
-            let traced = self.trace.is_some() && self.gen_parent.is_some() && self.gen_name.is_some();
-            let start_ms = crate::trace::now_ms();
-            let input_json = if traced {
-                serde_json::to_value(&messages).unwrap_or(serde_json::Value::Null)
-            } else {
-                serde_json::Value::Null
-            };
+        let traced = self.trace.is_some() && self.gen_parent.is_some() && self.gen_name.is_some();
+        let start_ms = crate::trace::now_ms();
+        let input_json = if traced {
+            serde_json::to_value(&messages).unwrap_or(serde_json::Value::Null)
+        } else {
+            serde_json::Value::Null
+        };
 
-            match self.provider {
-                LlmProvider::Vertex => {
-                    let text = crate::llm::vertex::complete(
-                        &self.http,
-                        &self.base_url,
-                        &self.vertex_project,
-                        &self.vertex_location,
-                        &self.model,
-                        self.max_tokens,
-                        self.temperature,
-                        messages,
-                    )
-                    .await?;
-                    let text = if self.strip_thinking { strip_thinking(&text) } else { text };
-                    self.emit_generation(start_ms, None, 0, 0, input_json, &text);
-                    return Ok(text);
-                }
-                LlmProvider::OpenAi => {}
-            }
-
-            let url = format!("{}/chat/completions", self.base_url);
-
-            let req = ChatRequest {
-                model: self.model.clone(),
-                messages,
-                max_tokens: self.max_tokens,
-                temperature: self.temperature,
-                stream: false,
-                chat_template_kwargs: if self.disable_thinking {
-                    Some(json!({"enable_thinking": false}))
+        match self.provider {
+            LlmProvider::Vertex => {
+                let text = crate::llm::vertex::complete(
+                    &self.http,
+                    &self.base_url,
+                    &self.vertex_project,
+                    &self.vertex_location,
+                    &self.model,
+                    self.max_tokens,
+                    self.temperature,
+                    messages,
+                )
+                .await?;
+                let text = if self.strip_thinking {
+                    strip_thinking(&text)
                 } else {
-                    None
-                },
-            };
-
-            debug!(url, model = %self.model, disable_thinking = self.disable_thinking, "LLM request");
-
-            let mut last_err: Option<anyhow::Error> = None;
-            for attempt in 0u32..3 {
-                if attempt > 0 {
-                    let delay = std::time::Duration::from_secs(1 << (attempt - 1));
-                    warn!(attempt, delay_secs = delay.as_secs(), "LLM transient error, retrying");
-                    tokio::time::sleep(delay).await;
-                }
-
-                let resp = match self
-                    .http
-                    .post(&url)
-                    .bearer_auth(&self.api_key)
-                    .json(&req)
-                    .send()
-                    .await
-                {
-                    Ok(r) => r,
-                    Err(e) => {
-                        last_err = Some(anyhow::anyhow!("LLM HTTP request failed: {e}"));
-                        continue;
-                    }
+                    text
                 };
-
-                let status = resp.status();
-                if !status.is_success() {
-                    let body = resp.text().await.unwrap_or_default();
-                    if status.is_server_error() || status.as_u16() == 429 {
-                        last_err = Some(anyhow::anyhow!("LLM error {status}: {body}"));
-                        continue;
-                    }
-                    anyhow::bail!("LLM error {status}: {body}");
-                }
-
-                let chat: ChatResponse = resp.json().await.context("LLM response parse")?;
-                let usage = chat.usage.unwrap_or_default();
-                let text = chat
-                    .choices
-                    .into_iter()
-                    .next()
-                    .map(|c| c.message.content)
-                    .unwrap_or_default();
-
-                let text = text.trim().to_string();
-                let text = if self.strip_thinking { strip_thinking(&text) } else { text };
-                self.emit_generation(start_ms, None, usage.prompt_tokens, usage.completion_tokens, input_json, &text);
+                self.emit_generation(start_ms, None, 0, 0, input_json, &text);
                 return Ok(text);
             }
-
-            Err(last_err.unwrap_or_else(|| anyhow::anyhow!("LLM request failed after 3 attempts")))
+            LlmProvider::OpenAi => {}
         }
 
-        /// Emit a generation observation if this client is trace-scoped. No-op otherwise.
-        fn emit_generation(
-            &self,
-            start_ms: u128,
-            ttft_ms: Option<f64>,
-            input_tokens: u32,
-            output_tokens: u32,
-            input: serde_json::Value,
-            output: &str,
-        ) {
-            if let (Some(trace), Some(parent), Some(name)) =
-                (&self.trace, &self.gen_parent, &self.gen_name)
-            {
-                trace.log_generation(
-                    parent,
-                    name,
-                    &self.model,
-                    start_ms,
-                    crate::trace::now_ms(),
-                    ttft_ms,
-                    input_tokens,
-                    output_tokens,
-                    input,
-                    serde_json::json!(output),
+        let url = format!("{}/chat/completions", self.base_url);
+
+        let req = ChatRequest {
+            model: self.model.clone(),
+            messages,
+            max_tokens: self.max_tokens,
+            temperature: self.temperature,
+            stream: false,
+            chat_template_kwargs: if self.disable_thinking {
+                Some(json!({"enable_thinking": false}))
+            } else {
+                None
+            },
+        };
+
+        debug!(url, model = %self.model, disable_thinking = self.disable_thinking, "LLM request");
+
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 0u32..3 {
+            if attempt > 0 {
+                let delay = std::time::Duration::from_secs(1 << (attempt - 1));
+                warn!(
+                    attempt,
+                    delay_secs = delay.as_secs(),
+                    "LLM transient error, retrying"
                 );
+                tokio::time::sleep(delay).await;
             }
+
+            let resp = match self
+                .http
+                .post(&url)
+                .bearer_auth(&self.api_key)
+                .json(&req)
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    last_err = Some(anyhow::anyhow!("LLM HTTP request failed: {e}"));
+                    continue;
+                }
+            };
+
+            let status = resp.status();
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                if status.is_server_error() || status.as_u16() == 429 {
+                    last_err = Some(anyhow::anyhow!("LLM error {status}: {body}"));
+                    continue;
+                }
+                anyhow::bail!("LLM error {status}: {body}");
+            }
+
+            let chat: ChatResponse = resp.json().await.context("LLM response parse")?;
+            let usage = chat.usage.unwrap_or_default();
+            let text = chat
+                .choices
+                .into_iter()
+                .next()
+                .map(|c| c.message.content)
+                .unwrap_or_default();
+
+            let text = text.trim().to_string();
+            let text = if self.strip_thinking {
+                strip_thinking(&text)
+            } else {
+                text
+            };
+            self.emit_generation(
+                start_ms,
+                None,
+                usage.prompt_tokens,
+                usage.completion_tokens,
+                input_json,
+                &text,
+            );
+            return Ok(text);
         }
+
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("LLM request failed after 3 attempts")))
+    }
+
+    /// Emit a generation observation if this client is trace-scoped. No-op otherwise.
+    fn emit_generation(
+        &self,
+        start_ms: u128,
+        ttft_ms: Option<f64>,
+        input_tokens: u32,
+        output_tokens: u32,
+        input: serde_json::Value,
+        output: &str,
+    ) {
+        if let (Some(trace), Some(parent), Some(name)) =
+            (&self.trace, &self.gen_parent, &self.gen_name)
+        {
+            trace.log_generation(
+                parent,
+                name,
+                &self.model,
+                start_ms,
+                crate::trace::now_ms(),
+                ttft_ms,
+                input_tokens,
+                output_tokens,
+                input,
+                serde_json::json!(output),
+            );
+        }
+    }
 }
 
 fn resolved_fast_provider(cfg: &Config, use_fast: bool) -> LlmProvider {
@@ -529,5 +558,4 @@ mod tests {
         // original unchanged
         assert!(client.gen_parent.is_none());
     }
-
 }
