@@ -22,6 +22,7 @@ mod llm;
 mod researcher;
 mod scraper;
 mod search;
+mod trace;
 
 use anyhow::Result;
 use rmcp::{

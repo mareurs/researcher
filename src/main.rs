@@ -6,6 +6,7 @@ mod researcher;
 mod scraper;
 mod search;
 mod server;
+mod trace;
 
 use clap::Parser;
 use std::sync::Arc;

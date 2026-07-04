@@ -54,6 +54,10 @@ thiserror = "2"
 url = "2"
 regex = "1"
 
+# Tracing / observability IDs + timestamps
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+
 [profile.release]
 opt-level = 3
 lto = true
