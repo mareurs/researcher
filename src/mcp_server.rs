@@ -588,6 +588,10 @@ fn config_from_env() -> Config {
         rerank_authority_weight: env_f32("RERANK_AUTHORITY_WEIGHT", 0.2),
         rerank_quality_weight: env_f32("RERANK_QUALITY_WEIGHT", 0.1),
         rerank_min_score: env_f32("RERANK_MIN_SCORE", -5.0),
+        langfuse_host: env("LANGFUSE_HOST", ""),
+        langfuse_public_key: env("LANGFUSE_PUBLIC_KEY", ""),
+        langfuse_secret_key: env("LANGFUSE_SECRET_KEY", ""),
+        langfuse_max_payload_chars: env_usize("LANGFUSE_MAX_PAYLOAD_CHARS", 50000),
         min_content_words: env_usize("MIN_CONTENT_WORDS", 100),
         min_text_density: env_f32("MIN_TEXT_DENSITY", 0.05),
         max_search_queries: env_usize("MAX_SEARCH_QUERIES", 4),
@@ -604,5 +608,23 @@ fn config_from_env() -> Config {
             twitter_cookie:   std::env::var("TWITTER_COOKIE").ok(),
         },
         job_profile: config::load_job_profile(),
+    }
+}
+
+#[cfg(test)]
+mod langfuse_config_tests {
+    use super::*;
+
+    #[test]
+    fn config_from_env_defaults_disable_tracing() {
+        // With no LANGFUSE_* env set, host + keys are empty (⇒ tracing off).
+        // (Test process may inherit env; assert the *default* path via the helper.)
+        std::env::remove_var("LANGFUSE_HOST");
+        std::env::remove_var("LANGFUSE_PUBLIC_KEY");
+        std::env::remove_var("LANGFUSE_SECRET_KEY");
+        let cfg = config_from_env();
+        assert!(cfg.langfuse_host.is_empty());
+        assert!(cfg.langfuse_public_key.is_empty());
+        assert_eq!(cfg.langfuse_max_payload_chars, 50000);
     }
 }

@@ -174,6 +174,23 @@ pub struct Config {
     #[arg(long, env = "RERANK_MIN_SCORE", default_value = "-5.0")]
     pub rerank_min_score: f32,
 
+    // ── Tracing (Langfuse) ───────────────────────────────────────────────────
+    /// Langfuse base URL, e.g. http://localhost:3000 (empty = tracing disabled)
+    #[arg(long, env = "LANGFUSE_HOST", default_value = "")]
+    pub langfuse_host: String,
+
+    /// Langfuse project public key (empty = tracing disabled)
+    #[arg(long, env = "LANGFUSE_PUBLIC_KEY", default_value = "")]
+    pub langfuse_public_key: String,
+
+    /// Langfuse project secret key (empty = tracing disabled)
+    #[arg(long, env = "LANGFUSE_SECRET_KEY", default_value = "")]
+    pub langfuse_secret_key: String,
+
+    /// Truncate captured LLM/stage input & output to this many chars
+    #[arg(long, env = "LANGFUSE_MAX_PAYLOAD_CHARS", default_value = "50000")]
+    pub langfuse_max_payload_chars: usize,
+
     // ── Quality filter ───────────────────────────────────────────────────────
     /// Minimum word count for a source to pass quality filter
     #[arg(long, env = "MIN_CONTENT_WORDS", default_value = "100")]
