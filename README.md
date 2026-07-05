@@ -364,6 +364,14 @@ Both are disabled when their `*_BASE_URL` is empty — the pipeline skips those 
 | `BIND_ADDR` | `0.0.0.0:3000` | HTTP server bind address |
 | `RUST_LOG` | `info` | Log level filter |
 
+### Tracing (Langfuse, optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LANGFUSE_HOST` | `` (disabled) | Langfuse base URL; empty disables tracing |
+| `LANGFUSE_PUBLIC_KEY` | `` | Langfuse project public key |
+| `LANGFUSE_SECRET_KEY` | `` | Langfuse project secret key |
+| `LANGFUSE_MAX_PAYLOAD_CHARS` | `50000` | Truncate captured LLM/stage I/O |
 ## Domain Profiles
 
 `profiles.toml` defines named source lists. Pass `domain_profile="tech-news"` to any tool or API call to restrict searches to those domains. Profiles can be combined with a raw `domains` list — they are unioned.

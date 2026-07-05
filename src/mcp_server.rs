@@ -486,6 +486,8 @@ impl ServerHandler for ResearcherServer {
              \n\
              research(\"attention mechanism transformers\",\n\
                intent=\"academic\", domain_profile=\"academic\", mode=\"report\")\n\
+             \n\
+             Runs are traced to Langfuse when LANGFUSE_HOST + keys are set (see env).\n\
              ".to_string(),
         )
     }

@@ -211,6 +211,10 @@ query → planner (LLM) → [search+scrape]×N → quality filter → embed-dedu
 | `ADZUNA_APP_ID`  | `` | Adzuna API app ID (free tier at developer.adzuna.com) |
 | `ADZUNA_APP_KEY` | `` | Adzuna API app key |
 | `ADZUNA_COUNTRY` | `us` | Adzuna API country code (us, gb, de, fr, etc.) |
+| `LANGFUSE_HOST` | `` (disabled) | Langfuse base URL; empty disables tracing |
+| `LANGFUSE_PUBLIC_KEY` | `` | Langfuse project public key |
+| `LANGFUSE_SECRET_KEY` | `` | Langfuse project secret key |
+| `LANGFUSE_MAX_PAYLOAD_CHARS` | `50000` | Truncate captured LLM/stage I/O |
 
 ## Model Download
 
