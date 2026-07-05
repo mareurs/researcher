@@ -219,6 +219,11 @@ pub struct Config {
     #[arg(long, env = "MAX_PAGE_CHARS", default_value = "8000")]
     pub max_page_chars: usize,
 
+    /// Report size (chars) above which progressive disclosure kicks in — full report saved
+    /// to disk, compact envelope (summary/toc/path) returned instead. 0 disables disclosure.
+    #[arg(long, env = "PROGRESSIVE_DISCLOSURE_CHARS", default_value = "4000")]
+    pub progressive_disclosure_chars: usize,
+
     /// Save the final report to a file (markdown)
     #[arg(short, long, env = "OUTPUT_FILE")]
     pub output: Option<std::path::PathBuf>,

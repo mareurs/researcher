@@ -611,6 +611,7 @@ fn config_from_env() -> Config {
             twitter_cookie:   std::env::var("TWITTER_COOKIE").ok(),
         },
         job_profile: config::load_job_profile(),
+        progressive_disclosure_chars: env_usize("PROGRESSIVE_DISCLOSURE_CHARS", 4000),
     }
 }
 

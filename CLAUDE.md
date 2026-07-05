@@ -216,6 +216,7 @@ query → planner (LLM) → [search+scrape]×N → quality filter → embed-dedu
 | `LANGFUSE_SECRET_KEY` | `` | Langfuse project secret key |
 | `LANGFUSE_MAX_PAYLOAD_CHARS` | `50000` | Truncate captured LLM/stage I/O |
 | `LLM_JUDGE_ENABLED` | `false` | Opt-in LLM-judge scoring of the final report (relevance/coverage/faithfulness/citation-validity) → Langfuse scores |
+| `PROGRESSIVE_DISCLOSURE_CHARS` | `4000` | Report size (chars) above which a compact envelope (summary/toc/path) replaces the inline report; `0` disables disclosure |
 
 ## Model Download
 

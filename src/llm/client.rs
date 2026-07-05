@@ -518,6 +518,7 @@ mod tests {
             max_search_queries: 4,
             max_sources_per_query: 4,
             max_page_chars: 8000,
+            progressive_disclosure_chars: 4000,
             output: None,
             mode: "report".into(),
             domain_profile: None,
