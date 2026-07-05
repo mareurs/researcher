@@ -7,18 +7,23 @@ use crate::config::Config;
 use langfuse::{GenerationLog, LangfuseClient};
 use reqwest::Client;
 use serde_json::Value;
-use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 pub use langfuse::now_ms;
 
-/// One trace per research run. Clone-cheap (Arc-backed) so it can be injected
-/// into LlmClients and survive the concurrent summarizer.
+/// One trace per research run. Clone-cheap (holds a cloneable channel sender) so
+/// it can be injected into LlmClients and survive the concurrent summarizer.
+/// Events are queued to a background flusher task (see `from_config`); dropping
+/// every clone closes the channel, letting the flusher's `JoinHandle` complete —
+/// callers should await that handle before returning to guarantee delivery
+/// (see `pipeline::run`).
 #[derive(Clone)]
 pub struct ResearchTrace {
-    client: Arc<LangfuseClient>,
     trace_id: String,
     max_payload: usize,
+    tx: mpsc::UnboundedSender<Vec<Value>>,
 }
 
 /// An open span. `end_span` consumes it and emits the span-create event.
@@ -32,7 +37,10 @@ pub struct SpanHandle {
 
 impl ResearchTrace {
     /// Returns `None` (tracing disabled) unless host + both keys are set.
-    pub fn from_config(cfg: &Config) -> Option<ResearchTrace> {
+    /// Also spawns a background flusher task; await the returned `JoinHandle`
+    /// after dropping every `ResearchTrace`/`LlmClient` clone to guarantee
+    /// delivery of all queued events before the caller returns.
+    pub fn from_config(cfg: &Config) -> Option<(ResearchTrace, JoinHandle<()>)> {
         if cfg.langfuse_host.is_empty()
             || cfg.langfuse_public_key.is_empty()
             || cfg.langfuse_secret_key.is_empty()
@@ -49,11 +57,22 @@ impl ResearchTrace {
             cfg.langfuse_host.trim_end_matches('/').to_string(),
             http,
         );
-        Some(ResearchTrace {
-            client: Arc::new(client),
-            trace_id: Uuid::new_v4().to_string(),
-            max_payload: cfg.langfuse_max_payload_chars,
-        })
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<Value>>();
+        let handle = tokio::spawn(async move {
+            while let Some(batch) = drain_batch(&mut rx).await {
+                client.ingest(batch).await;
+            }
+        });
+
+        Some((
+            ResearchTrace {
+                trace_id: Uuid::new_v4().to_string(),
+                max_payload: cfg.langfuse_max_payload_chars,
+                tx,
+            },
+            handle,
+        ))
     }
 
     pub fn trace_id(&self) -> &str {
@@ -135,8 +154,10 @@ impl ResearchTrace {
     }
 
     fn spawn(&self, batch: Vec<Value>) {
-        let client = self.client.clone();
-        tokio::spawn(async move { client.ingest(batch).await });
+        // Best-effort: a send error means the flusher task already exited, which
+        // only happens after every ResearchTrace clone (this one included) is
+        // dropped — i.e. the run is already past the point of caring.
+        let _ = self.tx.send(batch);
     }
 
     /// Recursively truncate every string leaf to `max_payload` chars (char-safe).
@@ -158,6 +179,20 @@ impl ResearchTrace {
         }
         walk(v, self.max_payload)
     }
+
+
+}
+
+/// Pull the next batch off `rx`, then greedily coalesce whatever else is
+/// already queued into it (non-blocking) so a burst of events becomes one
+/// `ingest()` call instead of many. Returns `None` once the channel is closed
+/// and fully drained.
+async fn drain_batch(rx: &mut mpsc::UnboundedReceiver<Vec<Value>>) -> Option<Vec<Value>> {
+    let mut batch = rx.recv().await?;
+    while let Ok(more) = rx.try_recv() {
+        batch.extend(more);
+    }
+    Some(batch)
 }
 
 #[cfg(test)]
@@ -182,21 +217,53 @@ mod tests {
         assert!(ResearchTrace::from_config(&cfg_with("http://x", "pk", "")).is_none());
     }
 
-    #[test]
-    fn from_config_enabled_when_complete() {
-        let t = ResearchTrace::from_config(&cfg_with("http://localhost:3000", "pk", "sk"));
+    #[tokio::test]
+    async fn from_config_enabled_when_complete() {
+        let t = ResearchTrace::from_config(&cfg_with("http://127.0.0.1:1", "pk", "sk"));
         assert!(t.is_some());
-        assert!(!t.unwrap().trace_id().is_empty());
+        let (trace, _handle) = t.unwrap();
+        assert!(!trace.trace_id().is_empty());
     }
 
-    #[test]
-    fn truncate_shortens_long_strings_char_safe() {
-        let t = ResearchTrace::from_config(&cfg_with("http://x", "pk", "sk")).unwrap();
+    #[tokio::test]
+    async fn truncate_shortens_long_strings_char_safe() {
+        let (t, _handle) = ResearchTrace::from_config(&cfg_with("http://127.0.0.1:1", "pk", "sk")).unwrap();
         let out = t.truncate(json!({"k": "abcdefghijklmnop"})); // 16 chars, max 10
         let s = out["k"].as_str().unwrap();
         assert!(s.starts_with("abcdefghij"));
         assert!(s.contains("[+6 chars]"));
         // short strings untouched
         assert_eq!(t.truncate(json!("short")), json!("short"));
+    }
+
+    #[tokio::test]
+    async fn from_config_flush_handle_completes_after_trace_dropped() {
+        // Port 1 on localhost: nothing listens there, so ingest() fails fast and
+        // warn-logs (fire-and-forget contract) — we're testing that the flusher
+        // task exits once the channel closes, not that ingestion succeeds.
+        let (trace, handle) = ResearchTrace::from_config(&cfg_with("http://127.0.0.1:1", "pk", "sk")).unwrap();
+        trace.start("test", json!(null), json!({}), vec![]);
+        drop(trace);
+        tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("flusher task should exit once every ResearchTrace clone is dropped")
+            .expect("flusher task should not panic");
+    }
+
+    #[tokio::test]
+    async fn drain_batch_coalesces_all_currently_queued_sends() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<serde_json::Value>>();
+        tx.send(vec![json!({"a": 1})]).unwrap();
+        tx.send(vec![json!({"a": 2})]).unwrap();
+        tx.send(vec![json!({"a": 3})]).unwrap();
+        let batch = drain_batch(&mut rx).await.expect("channel is open and has data");
+        assert_eq!(batch.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn drain_batch_returns_none_once_channel_closed_and_drained() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<serde_json::Value>>();
+        drop(tx);
+        assert!(drain_batch(&mut rx).await.is_none());
     }
 }
