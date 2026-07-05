@@ -215,6 +215,7 @@ query → planner (LLM) → [search+scrape]×N → quality filter → embed-dedu
 | `LANGFUSE_PUBLIC_KEY` | `` | Langfuse project public key |
 | `LANGFUSE_SECRET_KEY` | `` | Langfuse project secret key |
 | `LANGFUSE_MAX_PAYLOAD_CHARS` | `50000` | Truncate captured LLM/stage I/O |
+| `LLM_JUDGE_ENABLED` | `false` | Opt-in LLM-judge scoring of the final report (relevance/coverage/faithfulness/citation-validity) → Langfuse scores |
 
 ## Model Download
 

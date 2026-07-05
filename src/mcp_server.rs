@@ -594,6 +594,7 @@ fn config_from_env() -> Config {
         langfuse_public_key: env("LANGFUSE_PUBLIC_KEY", ""),
         langfuse_secret_key: env("LANGFUSE_SECRET_KEY", ""),
         langfuse_max_payload_chars: env_usize("LANGFUSE_MAX_PAYLOAD_CHARS", 50000),
+        judge_enabled: env_bool("LLM_JUDGE_ENABLED", false),
         min_content_words: env_usize("MIN_CONTENT_WORDS", 100),
         min_text_density: env_f32("MIN_TEXT_DENSITY", 0.05),
         max_search_queries: env_usize("MAX_SEARCH_QUERIES", 4),
@@ -629,4 +630,21 @@ mod langfuse_config_tests {
         assert!(cfg.langfuse_public_key.is_empty());
         assert_eq!(cfg.langfuse_max_payload_chars, 50000);
     }
+
+    #[test]
+    fn config_from_env_judge_disabled_by_default() {
+        std::env::remove_var("LLM_JUDGE_ENABLED");
+        let cfg = config_from_env();
+        assert!(!cfg.judge_enabled);
+        std::env::remove_var("LLM_JUDGE_ENABLED");
+    }
+
+    #[test]
+    fn config_from_env_judge_enabled_via_env() {
+        std::env::set_var("LLM_JUDGE_ENABLED", "true");
+        let cfg = config_from_env();
+        assert!(cfg.judge_enabled);
+        std::env::remove_var("LLM_JUDGE_ENABLED");
+    }
+
 }

@@ -191,6 +191,12 @@ pub struct Config {
     #[arg(long, env = "LANGFUSE_MAX_PAYLOAD_CHARS", default_value = "50000")]
     pub langfuse_max_payload_chars: usize,
 
+    /// Enable LLM-judge scoring of the final report (relevance/coverage/
+    /// faithfulness/citation-validity). Requires Langfuse tracing to also
+    /// be enabled — scores attach to the run's trace.
+    #[arg(long, env = "LLM_JUDGE_ENABLED", default_value = "false")]
+    pub judge_enabled: bool,
+
     // ── Quality filter ───────────────────────────────────────────────────────
     /// Minimum word count for a source to pass quality filter
     #[arg(long, env = "MIN_CONTENT_WORDS", default_value = "100")]

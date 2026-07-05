@@ -512,6 +512,7 @@ mod tests {
             langfuse_public_key: String::new(),
             langfuse_secret_key: String::new(),
             langfuse_max_payload_chars: 50000,
+            judge_enabled: false,
             min_content_words: 100,
             min_text_density: 0.05,
             max_search_queries: 4,
