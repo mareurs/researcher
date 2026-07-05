@@ -6,6 +6,7 @@ use tracing::{debug, warn};
 use crate::config::Config;
 use crate::scraper::html::fetch_and_extract;
 
+
 #[derive(Debug, Clone)]
 pub struct ScrapedSource {
     pub url: String,
@@ -32,6 +33,7 @@ fn domain_from_url(url: &str) -> String {
         .unwrap_or("")
         .to_lowercase()
 }
+
 
 /// Domains that consistently return off-topic results and should never be scraped.
 /// e.g. "Rust" the game showing up in Rust programming language searches.
@@ -66,6 +68,7 @@ const DOMAIN_BLACKLIST: &[&str] = &[
     "udemy.com",
     "khanacademy.org",
 ];
+
 
 /// For a single sub-question: search → deduplicate URLs → scrape in parallel.
 pub async fn crawl_query(
@@ -109,10 +112,7 @@ pub async fn crawl_query(
         .into_iter()
         .filter(|r| {
             let host = domain_from_url(&r.url);
-            if DOMAIN_BLACKLIST
-                .iter()
-                .any(|b| host == *b || host.ends_with(&format!(".{b}")))
-            {
+            if DOMAIN_BLACKLIST.iter().any(|b| host == *b || host.ends_with(&format!(".{b}"))) {
                 debug!(url = %r.url, "skipping blacklisted domain");
                 return false;
             }
@@ -128,9 +128,8 @@ pub async fn crawl_query(
     debug!(count = fresh.len(), %query, "scraping URLs");
 
     // 3. Partition: pre-extracted content (Tavily/Exa) vs needs scraping
-    let (pre_extracted, needs_scraping): (Vec<_>, Vec<_>) = fresh
-        .into_iter()
-        .partition(|r| r.content.as_deref().is_some_and(|c| !c.is_empty()));
+    let (pre_extracted, needs_scraping): (Vec<_>, Vec<_>) =
+        fresh.into_iter().partition(|r| r.content.as_deref().is_some_and(|c| !c.is_empty()));
 
     // Build ScrapedSource for pre-extracted results — no HTTP fetch needed
     let mut sources: Vec<ScrapedSource> = pre_extracted
@@ -168,13 +167,7 @@ pub async fn crawl_query(
         let url = result.url.clone();
         let max_chars = cfg.max_page_chars;
         let cookie: Option<String> = {
-            let host = url
-                .split("://")
-                .nth(1)
-                .unwrap_or("")
-                .split('/')
-                .next()
-                .unwrap_or("");
+            let host = url.split("://").nth(1).unwrap_or("").split('/').next().unwrap_or("");
             cfg.auth.cookie_for_host(host).map(|c| c.to_string())
         };
         async move { fetch_and_extract(&http, &url, max_chars, cookie.as_deref()).await }
@@ -182,55 +175,62 @@ pub async fn crawl_query(
 
     let scraped = join_all(futs).await;
 
-    sources.extend(needs_scraping.into_iter().zip(scraped).map(
-        |(result, content)| match content {
-            Ok(page) => {
-                let domain = domain_from_url(&result.url);
-                let word_count = page.text.split_whitespace().count();
-                ScrapedSource {
-                    url: result.url,
-                    title: result.title,
-                    query: query.to_string(),
-                    domain,
-                    word_count,
-                    raw_html_len: page.raw_html_len,
-                    link_count: page.link_count,
-                    ad_link_count: page.ad_link_count,
-                    has_headings: page.has_headings,
-                    has_lists: page.has_lists,
-                    has_code_blocks: page.has_code_blocks,
-                    paywall_detected: page.paywall_detected,
-                    content: page.text,
+    sources.extend(
+        needs_scraping
+            .into_iter()
+            .zip(scraped)
+            .map(|(result, content)| match content {
+                Ok(page) => {
+                    let domain = domain_from_url(&result.url);
+                    let word_count = page.text.split_whitespace().count();
+                    ScrapedSource {
+                        url: result.url,
+                        title: result.title,
+                        query: query.to_string(),
+                        domain,
+                        word_count,
+                        raw_html_len: page.raw_html_len,
+                        link_count: page.link_count,
+                        ad_link_count: page.ad_link_count,
+                        has_headings: page.has_headings,
+                        has_lists: page.has_lists,
+                        has_code_blocks: page.has_code_blocks,
+                        paywall_detected: page.paywall_detected,
+                        content: page.text,
+                    }
                 }
-            }
-            Err(e) => {
-                warn!(%e, url = %result.url, "scrape failed, using snippet");
-                let domain = domain_from_url(&result.url);
-                let word_count = result.snippet.split_whitespace().count();
-                ScrapedSource {
-                    url: result.url,
-                    title: result.title,
-                    query: query.to_string(),
-                    domain,
-                    word_count,
-                    raw_html_len: 0,
-                    link_count: 0,
-                    ad_link_count: 0,
-                    has_headings: false,
-                    has_lists: false,
-                    has_code_blocks: false,
-                    paywall_detected: false,
-                    content: result.snippet,
+                Err(e) => {
+                    warn!(%e, url = %result.url, "scrape failed, using snippet");
+                    let domain = domain_from_url(&result.url);
+                    let word_count = result.snippet.split_whitespace().count();
+                    ScrapedSource {
+                        url: result.url,
+                        title: result.title,
+                        query: query.to_string(),
+                        domain,
+                        word_count,
+                        raw_html_len: 0,
+                        link_count: 0,
+                        ad_link_count: 0,
+                        has_headings: false,
+                        has_lists: false,
+                        has_code_blocks: false,
+                        paywall_detected: false,
+                        content: result.snippet,
+                    }
                 }
-            }
-        },
-    ));
+            }),
+    );
 
     Ok(sources)
 }
 
 /// Run all sub-queries in parallel, collecting deduplicated sources.
-pub async fn crawl_all(http: &Client, cfg: &Config, queries: &[String]) -> Vec<ScrapedSource> {
+pub async fn crawl_all(
+    http: &Client,
+    cfg: &Config,
+    queries: &[String],
+) -> Vec<ScrapedSource> {
     let mut visited = std::collections::HashSet::new();
     let mut all_sources = Vec::new();
 

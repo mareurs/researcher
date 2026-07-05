@@ -220,12 +220,7 @@ fn close_span_on_err<T>(
     result: Result<T>,
 ) -> Result<T> {
     if let Err(e) = &result {
-        end_span(
-            trace,
-            span.take(),
-            json!(null),
-            json!({ "error": e.to_string() }),
-        );
+        end_span(trace, span.take(), json!(null), json!({ "error": e.to_string() }));
     }
     result
 }
@@ -668,6 +663,7 @@ impl std::fmt::Display for ProgressEvent {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -677,24 +673,19 @@ mod tests {
     fn close_span_on_err_closes_span_with_error_before_propagating() {
         let (trace, mut rx) = ResearchTrace::for_test();
         let mut span = Some(trace.span("plan", None));
-        let result: Result<u32> =
-            close_span_on_err(&Some(trace), &mut span, Err(anyhow::anyhow!("boom")));
+        let result: Result<u32> = close_span_on_err(
+            &Some(trace),
+            &mut span,
+            Err(anyhow::anyhow!("boom")),
+        );
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().to_string(), "boom");
-        assert!(
-            span.is_none(),
-            "span should be taken/consumed on the error path"
-        );
+        assert!(span.is_none(), "span should be taken/consumed on the error path");
 
-        let batch = rx
-            .try_recv()
-            .expect("end_span should have queued a span-create event");
+        let batch = rx.try_recv().expect("end_span should have queued a span-create event");
         assert_eq!(batch[0]["type"], serde_json::json!("span-create"));
-        assert_eq!(
-            batch[0]["body"]["metadata"]["error"],
-            serde_json::json!("boom")
-        );
+        assert_eq!(batch[0]["body"]["metadata"]["error"], serde_json::json!("boom"));
     }
 
     #[test]
@@ -704,13 +695,7 @@ mod tests {
         let result = close_span_on_err(&Some(trace), &mut span, Ok::<_, anyhow::Error>(42));
 
         assert_eq!(result.unwrap(), 42);
-        assert!(
-            span.is_some(),
-            "success path must not close the span — caller closes it with stage-specific output"
-        );
-        assert!(
-            rx.try_recv().is_err(),
-            "no event should be queued until the caller's own end_span call"
-        );
+        assert!(span.is_some(), "success path must not close the span — caller closes it with stage-specific output");
+        assert!(rx.try_recv().is_err(), "no event should be queued until the caller's own end_span call");
     }
 }

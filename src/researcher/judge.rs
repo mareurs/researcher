@@ -47,14 +47,7 @@ pub async fn score_report(
     let sources_text = summaries
         .iter()
         .enumerate()
-        .map(|(i, s)| {
-            format!(
-                "--- Source {} ---\nURL: {}\nSummary:\n{}\n",
-                i + 1,
-                s.url,
-                s.summary
-            )
-        })
+        .map(|(i, s)| format!("--- Source {} ---\nURL: {}\nSummary:\n{}\n", i + 1, s.url, s.summary))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -114,20 +107,8 @@ pub async fn score_report(
     let batch = vec![
         score_create(trace_id, "relevance", clamp(scores.relevance), comment, ts),
         score_create(trace_id, "coverage", clamp(scores.coverage), comment, ts),
-        score_create(
-            trace_id,
-            "faithfulness",
-            clamp(scores.faithfulness),
-            comment,
-            ts,
-        ),
-        score_create(
-            trace_id,
-            "citation-validity",
-            clamp(scores.citation_validity),
-            comment,
-            ts,
-        ),
+        score_create(trace_id, "faithfulness", clamp(scores.faithfulness), comment, ts),
+        score_create(trace_id, "citation-validity", clamp(scores.citation_validity), comment, ts),
     ];
     client.ingest(batch).await;
 }

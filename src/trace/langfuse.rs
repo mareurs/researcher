@@ -17,12 +17,7 @@ pub struct LangfuseClient {
 
 impl LangfuseClient {
     pub fn new(public_key: String, secret_key: String, base_url: String, http: Client) -> Self {
-        Self {
-            public_key,
-            secret_key,
-            base_url,
-            http,
-        }
+        Self { public_key, secret_key, base_url, http }
     }
 
     /// POST a batch of ingestion events. Fire-and-forget: never returns an error,
@@ -195,13 +190,7 @@ pub fn generation_create(gen: &GenerationLog) -> Value {
 }
 
 /// score-create event: attach a named numeric score to a trace (e.g. an LLM-judge dimension).
-pub fn score_create(
-    trace_id: &str,
-    name: &str,
-    value: f64,
-    comment: Option<&str>,
-    ts_ms: u128,
-) -> Value {
+pub fn score_create(trace_id: &str, name: &str, value: f64, comment: Option<&str>, ts_ms: u128) -> Value {
     let mut body = json!({ "traceId": trace_id, "name": name, "value": value });
     if let Some(c) = comment {
         body["comment"] = json!(c);
@@ -226,16 +215,7 @@ mod tests {
 
     #[test]
     fn span_create_includes_parent_when_present() {
-        let ev = span_create(
-            "s1",
-            "t1",
-            Some("root"),
-            "plan",
-            0,
-            10,
-            json!(null),
-            json!({}),
-        );
+        let ev = span_create("s1", "t1", Some("root"), "plan", 0, 10, json!(null), json!({}));
         assert_eq!(ev["body"]["parentObservationId"], json!("root"));
         assert_eq!(ev["type"], json!("span-create"));
         assert_eq!(ev["body"]["traceId"], json!("t1"));
@@ -276,6 +256,7 @@ mod tests {
         assert_eq!(ev["body"]["statusMessage"], json!("boom"));
     }
 
+
     #[test]
     fn score_create_includes_comment_when_present() {
         let ev = score_create("t1", "relevance", 0.8, Some("solid report"), 0);
@@ -301,14 +282,7 @@ mod tests {
         let client = LangfuseClient::new(pk, sk, host, Client::new());
         let tid = uuid::Uuid::new_v4().to_string();
         client
-            .ingest(vec![trace_create(
-                &tid,
-                "test",
-                now_ms(),
-                json!("hi"),
-                json!({}),
-                vec![],
-            )])
+            .ingest(vec![trace_create(&tid, "test", now_ms(), json!("hi"), json!({}), vec![])])
             .await;
         // No panic == pass; check the Langfuse UI for the trace.
     }

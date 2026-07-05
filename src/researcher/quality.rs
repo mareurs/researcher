@@ -15,53 +15,31 @@ pub struct ContentQuality {
 
 /// Domain authority tiers.
 const TIER1_DOMAINS: &[&str] = &[
-    "wikipedia.org",
-    "github.com",
-    "arxiv.org",
-    "docs.rs",
-    "doc.rust-lang.org",
-    "developer.mozilla.org",
-    "w3.org",
+    "wikipedia.org", "github.com", "arxiv.org", "docs.rs",
+    "doc.rust-lang.org", "developer.mozilla.org", "w3.org",
 ];
 const TIER2_DOMAINS: &[&str] = &[
-    "nytimes.com",
-    "bbc.com",
-    "reuters.com",
-    "bloomberg.com",
-    "techcrunch.com",
-    "arstechnica.com",
-    "nature.com",
-    "stackoverflow.com",
+    "nytimes.com", "bbc.com", "reuters.com", "bloomberg.com",
+    "techcrunch.com", "arstechnica.com", "nature.com", "stackoverflow.com",
 ];
 const TIER3_DOMAINS: &[&str] = &[
-    "reddit.com",
-    "medium.com",
-    "quora.com",
-    "dev.to",
-    "hackernoon.com",
-    "substack.com",
+    "reddit.com", "medium.com", "quora.com", "dev.to",
+    "hackernoon.com", "substack.com",
 ];
 
 /// Target-specific authority boosts.
 fn target_authority_domains(target: &ResearchTarget) -> &'static [&'static str] {
     match target {
-        ResearchTarget::Person { .. } => {
-            &["linkedin.com", "twitter.com", "x.com", "crunchbase.com"]
-        }
+        ResearchTarget::Person { .. } => &[
+            "linkedin.com", "twitter.com", "x.com", "crunchbase.com",
+        ],
         ResearchTarget::Company => &[
-            "linkedin.com",
-            "crunchbase.com",
-            "glassdoor.com",
-            "trustpilot.com",
-            "bloomberg.com",
+            "linkedin.com", "crunchbase.com", "glassdoor.com",
+            "trustpilot.com", "bloomberg.com",
         ],
         ResearchTarget::Market { .. } => &[
-            "reuters.com",
-            "ft.com",
-            "bloomberg.com",
-            "wsj.com",
-            "coindesk.com",
-            "cointelegraph.com",
+            "reuters.com", "ft.com", "bloomberg.com", "wsj.com",
+            "coindesk.com", "cointelegraph.com",
         ],
         ResearchTarget::Topic => &[],
     }

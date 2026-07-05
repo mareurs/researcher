@@ -15,6 +15,7 @@ pub struct ExtractedPage {
     pub paywall_detected: bool,
 }
 
+
 /// Fetch a URL and extract clean readable text from the HTML body.
 /// Strips scripts, styles, nav, footer, ads — keeps main content.
 pub async fn fetch_and_extract(
@@ -65,7 +66,10 @@ fn extract_text(html: &str, max_chars: usize) -> ExtractedPage {
     let document = Html::parse_document(html);
 
     // Remove noise elements by collecting their text nodes to exclude
-    let noise_selector = Selector::parse("script, style, nav, header, footer, aside").unwrap();
+    let noise_selector = Selector::parse(
+        "script, style, nav, header, footer, aside",
+    )
+    .unwrap();
     let noise_text: std::collections::HashSet<String> = document
         .select(&noise_selector)
         .flat_map(|el| el.text())
@@ -114,8 +118,7 @@ fn extract_text(html: &str, max_chars: usize) -> ExtractedPage {
             break;
         }
 
-        let cut = (0..=remaining.min(text.len()))
-            .rev()
+        let cut = (0..=remaining.min(text.len())).rev()
             .find(|&i| text.is_char_boundary(i))
             .unwrap_or(0);
         let chunk = &text[..cut];
