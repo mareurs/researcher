@@ -189,8 +189,7 @@ pub fn generation_create(gen: &GenerationLog) -> Value {
     })
 }
 
-/// score-create event. Unused in v1 (the hook for the Phase-2 LLM judge).
-#[allow(dead_code)]
+/// score-create event: attach a named numeric score to a trace (e.g. an LLM-judge dimension).
 pub fn score_create(trace_id: &str, name: &str, value: f64, comment: Option<&str>, ts_ms: u128) -> Value {
     let mut body = json!({ "traceId": trace_id, "name": name, "value": value });
     if let Some(c) = comment {
