@@ -43,6 +43,11 @@ engines:
     engine: duckduckgo
     shortcut: ddg
     disabled: false
+    # DDG blocks Tor exit nodes (HTTP 403); route this engine direct instead of
+    # via the global outgoing.proxies Tor proxy.
+    network:
+      using_tor_proxy: false
+      proxies: {}
   - name: bing
     engine: bing
     shortcut: bi
