@@ -617,6 +617,8 @@ fn config_from_env() -> Config {
 #[cfg(test)]
 mod langfuse_config_tests {
     use super::*;
+    use std::sync::Mutex;
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn config_from_env_defaults_disable_tracing() {
@@ -633,6 +635,7 @@ mod langfuse_config_tests {
 
     #[test]
     fn config_from_env_judge_disabled_by_default() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("LLM_JUDGE_ENABLED");
         let cfg = config_from_env();
         assert!(!cfg.judge_enabled);
@@ -641,6 +644,7 @@ mod langfuse_config_tests {
 
     #[test]
     fn config_from_env_judge_enabled_via_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("LLM_JUDGE_ENABLED", "true");
         let cfg = config_from_env();
         assert!(cfg.judge_enabled);
