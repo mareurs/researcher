@@ -200,8 +200,8 @@ impl LlmClient {
     }
 
     /// Stream completion tokens to `tx`, accumulate and return the full text.
-    /// Emits a Langfuse generation (timing + I/O) when trace-scoped. Token usage
-    /// and TTFT for the streaming path are captured in a later phase (see roadmap T-13).
+    /// Emits a Langfuse generation when trace-scoped, with token usage for the Vertex
+    /// provider. OpenAI-streaming usage + TTFT remain future work (see roadmap T-13).
     pub async fn stream(
         &self,
         messages: Vec<ChatMessage>,
@@ -221,8 +221,8 @@ impl LlmClient {
             .timeout(std::time::Duration::from_secs(180))
             .build()?;
 
-        let text = match self.provider {
-            LlmProvider::OpenAi => {
+        let (text, input_tokens, output_tokens) = match self.provider {
+            LlmProvider::OpenAi => (
                 crate::llm::stream::stream_completion(
                     &http,
                     &self.base_url,
@@ -234,10 +234,12 @@ impl LlmClient {
                     messages,
                     tx,
                 )
-                .await?
-            }
+                .await?,
+                0,
+                0,
+            ),
             LlmProvider::Vertex => {
-                let text = crate::llm::vertex::stream(
+                let (text, it, ot) = crate::llm::vertex::stream(
                     &http,
                     &self.base_url,
                     &self.vertex_project,
@@ -249,15 +251,23 @@ impl LlmClient {
                     tx,
                 )
                 .await?;
-                if self.strip_thinking {
+                let text = if self.strip_thinking {
                     strip_thinking(&text)
                 } else {
                     text
-                }
+                };
+                (text, it, ot)
             }
         };
 
-        self.emit_generation(start_ms, None, 0, 0, input_json, &text);
+        self.emit_generation(
+            start_ms,
+            None,
+            input_tokens,
+            output_tokens,
+            input_json,
+            &text,
+        );
         Ok(text)
     }
 
@@ -277,7 +287,7 @@ impl LlmClient {
 
         match self.provider {
             LlmProvider::Vertex => {
-                let text = crate::llm::vertex::complete(
+                let (text, input_tokens, output_tokens) = crate::llm::vertex::complete(
                     &self.http,
                     &self.base_url,
                     &self.vertex_project,
@@ -293,7 +303,14 @@ impl LlmClient {
                 } else {
                     text
                 };
-                self.emit_generation(start_ms, None, 0, 0, input_json, &text);
+                self.emit_generation(
+                    start_ms,
+                    None,
+                    input_tokens,
+                    output_tokens,
+                    input_json,
+                    &text,
+                );
                 return Ok(text);
             }
             LlmProvider::OpenAi => {}

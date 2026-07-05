@@ -40,10 +40,21 @@ pub struct VertexRequest {
     pub generation_config: VertexGenerationConfig,
 }
 
+/// Token accounting returned by Vertex in `usageMetadata`.
+#[derive(Debug, Deserialize, Default, Clone, Copy)]
+pub struct VertexUsage {
+    #[serde(default, rename = "promptTokenCount")]
+    pub prompt_token_count: u32,
+    #[serde(default, rename = "candidatesTokenCount")]
+    pub candidates_token_count: u32,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct VertexResponse {
     #[serde(default)]
     pub candidates: Vec<VertexCandidate>,
+    #[serde(default, rename = "usageMetadata")]
+    pub usage_metadata: Option<VertexUsage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -297,7 +308,7 @@ pub async fn complete(
     max_tokens: u32,
     temperature: f32,
     messages: Vec<ChatMessage>,
-) -> Result<String> {
+) -> Result<(String, u32, u32)> {
     let token = access_token().await?;
     let req = build_request(&messages, max_tokens, temperature);
     let url = endpoint(base_url, project, location, model, false);
@@ -316,7 +327,14 @@ pub async fn complete(
         bail!("Vertex error {status}: {body}");
     }
 
-    extract_text(resp.json().await.context("Vertex response parse")?)
+    let vr: VertexResponse = resp.json().await.context("Vertex response parse")?;
+    let (input_tokens, output_tokens) = vr
+        .usage_metadata
+        .as_ref()
+        .map(|u| (u.prompt_token_count, u.candidates_token_count))
+        .unwrap_or((0, 0));
+    let text = extract_text(vr)?;
+    Ok((text, input_tokens, output_tokens))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -330,7 +348,7 @@ pub async fn stream(
     temperature: f32,
     messages: Vec<ChatMessage>,
     tx: mpsc::Sender<String>,
-) -> Result<String> {
+) -> Result<(String, u32, u32)> {
     let token = access_token().await?;
     let req = build_request(&messages, max_tokens, temperature);
     let url = endpoint(base_url, project, location, model, true);
@@ -350,6 +368,7 @@ pub async fn stream(
     }
 
     let mut full = String::new();
+    let mut usage = (0u32, 0u32);
     let mut stream = response.bytes_stream().eventsource();
 
     while let Some(event) = stream.next().await {
@@ -359,6 +378,9 @@ pub async fn stream(
                     break;
                 }
                 if let Ok(chunk) = serde_json::from_str::<VertexResponse>(&ev.data) {
+                    if let Some(u) = chunk.usage_metadata {
+                        usage = (u.prompt_token_count, u.candidates_token_count);
+                    }
                     let token = stream_chunk_text(chunk);
                     if !token.is_empty() {
                         full.push_str(&token);
@@ -374,7 +396,7 @@ pub async fn stream(
     if full.is_empty() {
         bail!("Vertex stream returned no text chunks");
     }
-    Ok(full)
+    Ok((full, usage.0, usage.1))
 }
 
 #[cfg(test)]
@@ -415,6 +437,7 @@ mod tests {
                     }],
                 }),
             }],
+            usage_metadata: None,
         };
 
         assert_eq!(extract_text(resp).unwrap(), "Hello");
@@ -422,7 +445,10 @@ mod tests {
 
     #[test]
     fn extract_text_errors_on_empty_response() {
-        let resp = VertexResponse { candidates: vec![] };
+        let resp = VertexResponse {
+            candidates: vec![],
+            usage_metadata: None,
+        };
         assert!(extract_text(resp).is_err());
     }
 }
