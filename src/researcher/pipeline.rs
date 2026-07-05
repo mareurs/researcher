@@ -272,8 +272,14 @@ pub async fn run(
         cfg.max_sources_per_query
     };
 
-    // Tracing: one trace per run (None when LANGFUSE_* unset ⇒ no-op).
-    let trace = ResearchTrace::from_config(cfg);
+    // Tracing: one trace per run (None when LANGFUSE_* unset ⇒ no-op). `trace_flush`
+    // is the background flusher's handle (see `ResearchTrace::from_config`) — awaited
+    // at the end of this function so queued Langfuse events are delivered before
+    // `run()` returns, even for short-lived CLI invocations.
+    let (trace, trace_flush) = match ResearchTrace::from_config(cfg) {
+        Some((t, handle)) => (Some(t), Some(handle)),
+        None => (None, None),
+    };
     if let Some(t) = &trace {
         t.start(
             &format!("research:{}", target_label(&request.target)),
@@ -540,6 +546,19 @@ pub async fn run(
         };
         t.finalize(&result, output);
     }
+
+    // Drop every clone of the trace's channel sender so the background flusher
+    // sees the channel close, then await its handle — guarantees all queued
+    // Langfuse events are sent before this function returns. Without this, a
+    // short-lived CLI run can exit before the fire-and-forget events (often
+    // `finalize` itself) are actually delivered.
+    drop(llm);
+    drop(llm_fast);
+    drop(trace);
+    if let Some(handle) = trace_flush {
+        let _ = handle.await;
+    }
+
     result
 }
 
