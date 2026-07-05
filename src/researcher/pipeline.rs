@@ -210,6 +210,20 @@ fn end_span(
     }
 }
 
+/// On `Err`, closes `*span` (recording the error) before the caller propagates
+/// via `?`. On `Ok`, leaves `*span` untouched so the caller closes it themselves
+/// with stage-specific output/metadata.
+fn close_span_on_err<T>(
+    trace: &Option<ResearchTrace>,
+    span: &mut Option<SpanHandle>,
+    result: Result<T>,
+) -> Result<T> {
+    if let Err(e) = &result {
+        end_span(trace, span.take(), json!(null), json!({ "error": e.to_string() }));
+    }
+    result
+}
+
 /// Scope an LlmClient to a span (owned clone). Falls back to a plain clone when untraced.
 fn scoped(llm: &LlmClient, span: &Option<SpanHandle>, name: &str) -> LlmClient {
     match span {
@@ -330,12 +344,13 @@ pub async fn run(
 
         // 4. Plan
         on_progress(ProgressEvent::Planning);
-        let plan_span = trace.as_ref().map(|t| t.span("plan", None));
-        let mut queries = generate_queries(
+        let mut plan_span = trace.as_ref().map(|t| t.span("plan", None));
+        let plan_result = generate_queries(
             &scoped(planner_llm, &plan_span, "plan"),
             topic, max_queries, &domains, &request.target,
             request.intent.as_deref(),
-        ).await?;
+        ).await;
+        let mut queries = close_span_on_err(&trace, &mut plan_span, plan_result)?;
         end_span(&trace, plan_span, json!(queries.clone()), json!({ "count": queries.len() }));
         on_progress(ProgressEvent::Queries(queries.clone()));
 
@@ -474,13 +489,14 @@ pub async fn run(
             warn!("all summaries empty or irrelevant — retrying with broader queries");
             on_progress(ProgressEvent::RetryingWithBroaderQueries);
 
-            let retry_span = trace.as_ref().map(|t| t.span("retry", None));
+            let mut retry_span = trace.as_ref().map(|t| t.span("retry", None));
             let retry_parent = retry_span.as_ref().map(|s| s.id.clone());
-            let broader = broaden_queries(
+            let broaden_result = broaden_queries(
                 &scoped(planner_llm, &retry_span, "retry.broaden"),
                 topic, &queries, max_queries, &domains, &request.target,
                 request.intent.as_deref(),
-            ).await?;
+            ).await;
+            let broader = close_span_on_err(&trace, &mut retry_span, broaden_result)?;
             queries = broader.clone();
             on_progress(ProgressEvent::Queries(broader.clone()));
 
@@ -508,6 +524,12 @@ pub async fn run(
             on_progress(ProgressEvent::SummarizingComplete { summaries: retry_summaries.len() });
 
             if retry_summaries.is_empty() {
+                end_span(
+                    &trace,
+                    retry_span,
+                    json!(null),
+                    json!({ "summaries_kept": 0, "error": "all summaries empty or irrelevant" }),
+                );
                 anyhow::bail!("All source summaries were empty or irrelevant.");
             }
             end_span(&trace, retry_span, json!(null), json!({ "summaries_kept": retry_summaries.len() }));
@@ -517,12 +539,13 @@ pub async fn run(
         };
 
         // 10. Write report (streaming if token_tx provided)
-        let write_span = trace.as_ref().map(|t| t.span("write-report", None));
+        let mut write_span = trace.as_ref().map(|t| t.span("write-report", None));
         on_progress(ProgressEvent::WritingReport);
-        let raw_report = write_report(
+        let write_result = write_report(
             &scoped(publisher_llm, &write_span, "write_report"),
             topic, &summaries, &request.mode, &request.target, token_tx,
-        ).await?;
+        ).await;
+        let raw_report = close_span_on_err(&trace, &mut write_span, write_result)?;
         end_span(&trace, write_span, json!({ "report_len": raw_report.len() }), json!({}));
         let report = format_report(&raw_report, &summaries);
         on_progress(ProgressEvent::Done);
@@ -611,5 +634,42 @@ impl std::fmt::Display for ProgressEvent {
             }
             Self::Done => write!(f, "✅ Research complete"),
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trace::ResearchTrace;
+
+    #[test]
+    fn close_span_on_err_closes_span_with_error_before_propagating() {
+        let (trace, mut rx) = ResearchTrace::for_test();
+        let mut span = Some(trace.span("plan", None));
+        let result: Result<u32> = close_span_on_err(
+            &Some(trace),
+            &mut span,
+            Err(anyhow::anyhow!("boom")),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "boom");
+        assert!(span.is_none(), "span should be taken/consumed on the error path");
+
+        let batch = rx.try_recv().expect("end_span should have queued a span-create event");
+        assert_eq!(batch[0]["type"], serde_json::json!("span-create"));
+        assert_eq!(batch[0]["body"]["metadata"]["error"], serde_json::json!("boom"));
+    }
+
+    #[test]
+    fn close_span_on_err_leaves_span_open_on_success() {
+        let (trace, mut rx) = ResearchTrace::for_test();
+        let mut span = Some(trace.span("plan", None));
+        let result = close_span_on_err(&Some(trace), &mut span, Ok::<_, anyhow::Error>(42));
+
+        assert_eq!(result.unwrap(), 42);
+        assert!(span.is_some(), "success path must not close the span — caller closes it with stage-specific output");
+        assert!(rx.try_recv().is_err(), "no event should be queued until the caller's own end_span call");
     }
 }

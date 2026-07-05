@@ -183,6 +183,25 @@ impl ResearchTrace {
 
 }
 
+
+#[cfg(test)]
+impl ResearchTrace {
+    /// Test-only: a `ResearchTrace` wired directly to a channel the test controls,
+    /// bypassing `from_config`'s real flusher task and any network access. Lets
+    /// tests assert exactly which events were queued.
+    pub(crate) fn for_test() -> (ResearchTrace, mpsc::UnboundedReceiver<Vec<Value>>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (
+            ResearchTrace {
+                trace_id: "test-trace".to_string(),
+                max_payload: 10_000,
+                tx,
+            },
+            rx,
+        )
+    }
+}
+
 /// Pull the next batch off `rx`, then greedily coalesce whatever else is
 /// already queued into it (non-blocking) so a burst of events becomes one
 /// `ingest()` call instead of many. Returns `None` once the channel is closed
