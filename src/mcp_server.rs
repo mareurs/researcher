@@ -935,3 +935,54 @@ mod langfuse_config_tests {
     }
 
 }
+
+#[cfg(test)]
+mod schema_sanitizer_tests {
+    use super::*;
+
+    #[test]
+    fn tool_router_schema_has_no_zod_hostile_fields() {
+        let server = ResearcherServer::new(config_from_env());
+        let mut checked = 0;
+        for route in server.tool_router.clone() {
+            checked += 1;
+            let schema = serde_json::Value::Object((*route.attr.input_schema).clone());
+            assert_no_forbidden_keys(&schema, checked);
+        }
+        assert!(checked > 0, "expected at least one registered tool route");
+    }
+
+    fn assert_no_forbidden_keys(v: &serde_json::Value, route_index: usize) {
+        match v {
+            serde_json::Value::Object(map) => {
+                assert!(
+                    !map.contains_key("$schema"),
+                    "route #{route_index}: schema still contains $schema — sanitizer regressed"
+                );
+                assert!(
+                    !matches!(map.get("format"), Some(serde_json::Value::String(s)) if s == "uint"),
+                    "route #{route_index}: schema still contains format=\"uint\" — sanitizer regressed"
+                );
+                assert!(
+                    !matches!(map.get("default"), Some(serde_json::Value::Null)),
+                    "route #{route_index}: schema still contains default:null — sanitizer regressed"
+                );
+                if let Some(serde_json::Value::Array(types)) = map.get("type") {
+                    assert!(
+                        !types.iter().any(|t| t == &serde_json::Value::String("null".into())),
+                        "route #{route_index}: schema still contains a nullable type union — sanitizer regressed"
+                    );
+                }
+                for child in map.values() {
+                    assert_no_forbidden_keys(child, route_index);
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for child in arr {
+                    assert_no_forbidden_keys(child, route_index);
+                }
+            }
+            _ => {}
+        }
+    }
+}
