@@ -3,6 +3,7 @@ use reqwest::Client;
 use tracing::{info, warn};
 
 use super::crawler::{crawl_all, ScrapedSource};
+use super::judge;
 use super::planner::{broaden_queries, generate_queries};
 use super::publisher::{format_report, write_report};
 use super::summarizer::summarize_all;
@@ -547,6 +548,31 @@ pub async fn run(
         ).await;
         let raw_report = close_span_on_err(&trace, &mut write_span, write_result)?;
         end_span(&trace, write_span, json!({ "report_len": raw_report.len() }), json!({}));
+
+        // 10b. LLM-judge scoring (background, opt-in via LLM_JUDGE_ENABLED).
+        // Deliberately does NOT clone `trace` (a ResearchTrace) into the spawned
+        // task — every clone shares the same per-run event channel that `run()`
+        // awaits via `trace_flush` right before returning (see the flush-before-
+        // return fix in this file). Holding a clone here would block that await
+        // until the judge finished, reintroducing the latency this design
+        // explicitly avoids. Instead we pass a plain `trace_id` string and an
+        // untraced `LlmClient` (no `.with_trace(...)`), so the task is fully
+        // independent of `run()`'s trace lifecycle and a judge failure can't
+        // affect the returned ResearchResult.
+        if cfg.judge_enabled {
+            if let Some(t) = &trace {
+                let trace_id = t.trace_id().to_string();
+                let cfg_owned = cfg.clone();
+                let judge_llm = LlmClient::new_fast(&cfg_owned);
+                let topic_owned = topic.to_string();
+                let report_owned = raw_report.clone();
+                let summaries_owned = summaries.clone();
+                tokio::spawn(async move {
+                    judge::score_report(&cfg_owned, &judge_llm, &trace_id, &topic_owned, &report_owned, &summaries_owned).await;
+                });
+            }
+        }
+
         let report = format_report(&raw_report, &summaries);
         on_progress(ProgressEvent::Done);
 
