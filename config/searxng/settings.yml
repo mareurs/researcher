@@ -38,7 +38,9 @@ engines:
   - name: google
     engine: google
     shortcut: g
-    disabled: false
+    # Blocked via Tor AND direct (403 / access-denied) — pure error noise.
+    # braveapi covers this result class reliably.
+    disabled: true
   - name: duckduckgo
     engine: duckduckgo
     shortcut: ddg
