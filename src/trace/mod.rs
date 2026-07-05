@@ -80,7 +80,14 @@ impl ResearchTrace {
     }
 
     pub fn start(&self, name: &str, input: Value, metadata: Value, tags: Vec<String>) {
-        let ev = langfuse::trace_create(&self.trace_id, name, now_ms(), self.truncate(input), metadata, tags);
+        let ev = langfuse::trace_create(
+            &self.trace_id,
+            name,
+            now_ms(),
+            self.truncate(input),
+            metadata,
+            tags,
+        );
         self.spawn(vec![ev]);
     }
 
@@ -141,7 +148,13 @@ impl ResearchTrace {
 
     pub fn finalize<T>(&self, result: &anyhow::Result<T>, output: Value) {
         let ev = match result {
-            Ok(_) => langfuse::trace_finalize(&self.trace_id, now_ms(), self.truncate(output), None, None),
+            Ok(_) => langfuse::trace_finalize(
+                &self.trace_id,
+                now_ms(),
+                self.truncate(output),
+                None,
+                None,
+            ),
             Err(e) => langfuse::trace_finalize(
                 &self.trace_id,
                 now_ms(),
@@ -173,16 +186,15 @@ impl ResearchTrace {
             match v {
                 Value::String(s) => Value::String(trunc_str(&s, max)),
                 Value::Array(a) => Value::Array(a.into_iter().map(|x| walk(x, max)).collect()),
-                Value::Object(o) => Value::Object(o.into_iter().map(|(k, x)| (k, walk(x, max))).collect()),
+                Value::Object(o) => {
+                    Value::Object(o.into_iter().map(|(k, x)| (k, walk(x, max))).collect())
+                }
                 other => other,
             }
         }
         walk(v, self.max_payload)
     }
-
-
 }
-
 
 #[cfg(test)]
 impl ResearchTrace {
@@ -246,7 +258,8 @@ mod tests {
 
     #[tokio::test]
     async fn truncate_shortens_long_strings_char_safe() {
-        let (t, _handle) = ResearchTrace::from_config(&cfg_with("http://127.0.0.1:1", "pk", "sk")).unwrap();
+        let (t, _handle) =
+            ResearchTrace::from_config(&cfg_with("http://127.0.0.1:1", "pk", "sk")).unwrap();
         let out = t.truncate(json!({"k": "abcdefghijklmnop"})); // 16 chars, max 10
         let s = out["k"].as_str().unwrap();
         assert!(s.starts_with("abcdefghij"));
@@ -260,7 +273,8 @@ mod tests {
         // Port 1 on localhost: nothing listens there, so ingest() fails fast and
         // warn-logs (fire-and-forget contract) — we're testing that the flusher
         // task exits once the channel closes, not that ingestion succeeds.
-        let (trace, handle) = ResearchTrace::from_config(&cfg_with("http://127.0.0.1:1", "pk", "sk")).unwrap();
+        let (trace, handle) =
+            ResearchTrace::from_config(&cfg_with("http://127.0.0.1:1", "pk", "sk")).unwrap();
         trace.start("test", json!(null), json!({}), vec![]);
         drop(trace);
         tokio::time::timeout(std::time::Duration::from_secs(5), handle)
@@ -275,7 +289,9 @@ mod tests {
         tx.send(vec![json!({"a": 1})]).unwrap();
         tx.send(vec![json!({"a": 2})]).unwrap();
         tx.send(vec![json!({"a": 3})]).unwrap();
-        let batch = drain_batch(&mut rx).await.expect("channel is open and has data");
+        let batch = drain_batch(&mut rx)
+            .await
+            .expect("channel is open and has data");
         assert_eq!(batch.len(), 3);
     }
 

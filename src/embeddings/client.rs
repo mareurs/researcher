@@ -50,7 +50,9 @@ impl EmbedClient {
         debug!(count = texts.len(), "embedding batch");
 
         let url = format!("{}/embed", self.base_url);
-        let req = EmbedRequest { inputs: texts.to_vec() };
+        let req = EmbedRequest {
+            inputs: texts.to_vec(),
+        };
 
         let resp = self
             .http

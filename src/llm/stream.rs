@@ -90,7 +90,11 @@ pub async fn stream_completion(
     }
 
     let full = full.trim().to_string();
-    Ok(if strip_thinking { strip_think(&full) } else { full })
+    Ok(if strip_thinking {
+        strip_think(&full)
+    } else {
+        full
+    })
 }
 
 fn strip_think(text: &str) -> String {
@@ -98,7 +102,10 @@ fn strip_think(text: &str) -> String {
     let mut rest = text;
     loop {
         match rest.find("<think>") {
-            None => { out.push_str(rest); break; }
+            None => {
+                out.push_str(rest);
+                break;
+            }
             Some(start) => {
                 out.push_str(&rest[..start]);
                 match rest[start..].find("</think>") {

@@ -34,10 +34,10 @@ pub struct ResearchBody {
 fn into_pipeline_request(body: ResearchBody) -> crate::researcher::pipeline::ResearchRequest {
     use crate::researcher::pipeline::{ResearchMode, ResearchRequest, ResearchTarget};
     let mode = match body.mode.as_deref().unwrap_or("report") {
-        "quick"   => ResearchMode::Quick,
+        "quick" => ResearchMode::Quick,
         "summary" => ResearchMode::Summary,
-        "deep"    => ResearchMode::Deep,
-        _         => ResearchMode::Report,
+        "deep" => ResearchMode::Deep,
+        _ => ResearchMode::Report,
     };
     ResearchRequest {
         topic: body.query,
@@ -78,10 +78,7 @@ async fn health() -> impl IntoResponse {
 }
 
 /// POST /research — blocking, returns complete report as JSON.
-async fn research_json(
-    State(cfg): State<AppState>,
-    Json(req): Json<ResearchBody>,
-) -> Response {
+async fn research_json(State(cfg): State<AppState>, Json(req): Json<ResearchBody>) -> Response {
     let request = into_pipeline_request(req);
     let result = run(&cfg, &request, |_| {}, None).await;
     match result {
@@ -89,11 +86,9 @@ async fn research_json(
             "report": r.report,
             "sources": r.sources,
             "queries": r.queries,
-        })).into_response(),
-        Err(e) => (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            e.to_string(),
-        ).into_response(),
+        }))
+        .into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
@@ -113,7 +108,11 @@ async fn research_stream(
         while let Some(tok) = token_rx.recv().await {
             let data = serde_json::json!({ "type": "token", "content": tok }).to_string();
             let _ = token_event_tx
-                .send(axum::response::sse::Event::default().data(data).event("token"))
+                .send(
+                    axum::response::sse::Event::default()
+                        .data(data)
+                        .event("token"),
+                )
                 .await;
         }
     });
@@ -122,23 +121,26 @@ async fn research_stream(
     tokio::spawn(async move {
         let request = into_pipeline_request(req);
         let tx_progress = event_tx.clone();
-        let result = run(&cfg, &request, move |event| {
-            let msg = ProgressMessage {
-                kind: "progress".into(),
-                message: event.to_string(),
-                data: match &event {
-                    ProgressEvent::Queries(q) => Some(serde_json::json!({ "queries": q })),
-                    ProgressEvent::CrawlComplete { sources } => {
-                        Some(serde_json::json!({ "sources": sources }))
-                    }
-                    _ => None,
-                },
-            };
-            let json = serde_json::to_string(&msg).unwrap_or_default();
-            let _ = tx_progress.try_send(
-                axum::response::sse::Event::default().data(json),
-            );
-        }, Some(token_tx))
+        let result = run(
+            &cfg,
+            &request,
+            move |event| {
+                let msg = ProgressMessage {
+                    kind: "progress".into(),
+                    message: event.to_string(),
+                    data: match &event {
+                        ProgressEvent::Queries(q) => Some(serde_json::json!({ "queries": q })),
+                        ProgressEvent::CrawlComplete { sources } => {
+                            Some(serde_json::json!({ "sources": sources }))
+                        }
+                        _ => None,
+                    },
+                };
+                let json = serde_json::to_string(&msg).unwrap_or_default();
+                let _ = tx_progress.try_send(axum::response::sse::Event::default().data(json));
+            },
+            Some(token_tx),
+        )
         .await;
 
         let final_event = match result {

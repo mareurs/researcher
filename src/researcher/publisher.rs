@@ -1,8 +1,8 @@
 use anyhow::Result;
 use tracing::info;
 
-use crate::llm::client::{ChatMessage, LlmClient};
 use super::summarizer::SourceSummary;
+use crate::llm::client::{ChatMessage, LlmClient};
 use crate::researcher::pipeline::ResearchMode;
 
 /// Build the final research report.
@@ -23,35 +23,44 @@ pub async fn write_report(
         .map(|(i, s)| {
             format!(
                 "--- Source {} ---\nURL: {}\nQuestion addressed: {}\nSummary:\n{}\n",
-                i + 1, s.url, s.query, s.summary,
+                i + 1,
+                s.url,
+                s.query,
+                s.summary,
             )
         })
         .collect::<Vec<_>>()
         .join("\n");
 
-    use crate::researcher::pipeline::{ResearchTarget, PersonMethod};
+    use crate::researcher::pipeline::{PersonMethod, ResearchTarget};
 
     let prompt = match target {
         ResearchTarget::Person { method } => {
             let sections = match method {
-                PersonMethod::Company => "\
+                PersonMethod::Company => {
+                    "\
 ## Identity\nCurrent role, company, location, tenure.\n\
 ## Career Path\nPrevious roles, trajectory, expertise areas.\n\
 ## Public Voice\nArticles, posts, talks, opinions they've shared publicly.\n\
 ## Conversation Hooks\nRecent wins, projects, interesting things worth referencing in a meeting.\n\
-## How to Position Your Work\nWhat they likely care about given their role and background.",
-                PersonMethod::Personal => "\
+## How to Position Your Work\nWhat they likely care about given their role and background."
+                }
+                PersonMethod::Personal => {
+                    "\
 ## Interests & Hobbies\nSports, travel, food, culture — from public posts and profiles.\n\
 ## Online Presence\nWhich platforms they're active on, posting style and tone.\n\
-## Personal Conversation Starters\nSpecific topics to build rapport and make a personal connection.",
-                PersonMethod::Both => "\
+## Personal Conversation Starters\nSpecific topics to build rapport and make a personal connection."
+                }
+                PersonMethod::Both => {
+                    "\
 ## Identity\nCurrent role, company, location, tenure.\n\
 ## Career Path\nPrevious roles, trajectory, expertise areas.\n\
 ## Public Voice\nArticles, posts, talks, opinions.\n\
 ## Conversation Hooks\nRecent wins, projects, things worth referencing.\n\
 ## How to Position Your Work\nWhat they care about given their role.\n\
 ## Interests & Hobbies\nSports, travel, food, culture — from public profiles.\n\
-## Personal Conversation Starters\nTopics to build personal rapport.",
+## Personal Conversation Starters\nTopics to build personal rapport."
+                }
             };
             format!(
                 "You are preparing a meeting-prep brief on a person named {topic}.\n\
@@ -75,27 +84,26 @@ pub async fn write_report(
                  {sources_text}"
             )
         }
-        ResearchTarget::Topic => {
-            match mode {
-                ResearchMode::Summary => format!(
-                    "Write a concise bullet-point summary:\n\
+        ResearchTarget::Topic => match mode {
+            ResearchMode::Summary => format!(
+                "Write a concise bullet-point summary:\n\
                      - 5-8 key findings as bullet points\n\
                      - Each bullet: one concrete fact, number, or conclusion\n\
                      - Prioritize actionable facts, numbers, and dates\n\
                      - No introduction, no conclusion, no section headers\n\n\
                      Topic: {topic}\n\n{sources_text}"
-                ),
-                ResearchMode::Deep => format!(
-                    "Write a thorough, detailed research report on: {topic}\n\
+            ),
+            ResearchMode::Deep => format!(
+                "Write a thorough, detailed research report on: {topic}\n\
                      - Begin with an executive summary (2-3 paragraphs)\n\
                      - Cover all major angles with dedicated ## sections\n\
                      - Include specific facts, numbers, dates, and source references\n\
                      - Conclude with key takeaways and open questions\n\
                      - Use markdown formatting throughout\n\n\
                      {sources_text}"
-                ),
-                _ => format!(
-                    "Research topic: {topic}\n\n\
+            ),
+            _ => format!(
+                "Research topic: {topic}\n\n\
                      You have gathered the following research from multiple sources:\n\n\
                      {sources_text}\n\n\
                      Write a comprehensive markdown research report on '{topic}' that:\n\
@@ -106,15 +114,14 @@ pub async fn write_report(
                      5. Ends with a 'Sources' section listing all URLs\n\
                      6. Includes a 'Key Takeaways' section\n\n\
                      Be thorough and analytical."
-                ),
-            }
-        }
+            ),
+        },
         ResearchTarget::Market { asset_class } => {
             use crate::researcher::pipeline::AssetClass;
             let asset_label = match asset_class {
-                AssetClass::Stock  => "stock / equity",
+                AssetClass::Stock => "stock / equity",
                 AssetClass::Crypto => "cryptocurrency / blockchain asset",
-                AssetClass::Macro  => "macroeconomic topic",
+                AssetClass::Macro => "macroeconomic topic",
             };
             match mode {
                 ResearchMode::Quick => format!(
@@ -175,7 +182,9 @@ pub async fn write_report(
 /// Format the final report with a source list appended.
 pub fn format_report(report: &str, summaries: &[SourceSummary]) -> String {
     // Check if the LLM already included sources
-    if report.to_lowercase().contains("## sources") || report.to_lowercase().contains("## references") {
+    if report.to_lowercase().contains("## sources")
+        || report.to_lowercase().contains("## references")
+    {
         return report.to_string();
     }
 
@@ -202,10 +211,15 @@ pub async fn write_code_report(
     let sources_text = summaries
         .iter()
         .enumerate()
-        .map(|(i, s)| format!(
-            "--- Source {} ---\nURL: {}\nAspect searched: {}\nSummary:\n{}\n",
-            i + 1, s.url, s.query, s.summary,
-        ))
+        .map(|(i, s)| {
+            format!(
+                "--- Source {} ---\nURL: {}\nAspect searched: {}\nSummary:\n{}\n",
+                i + 1,
+                s.url,
+                s.query,
+                s.summary,
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -220,7 +234,9 @@ pub async fn write_code_report(
     let section_instructions = sections.join("\n\n");
 
     if sections.is_empty() {
-        return Ok("No valid aspects provided. Use: bugs, changelog, community, releases.".to_string());
+        return Ok(
+            "No valid aspects provided. Use: bugs, changelog, community, releases.".to_string(),
+        );
     }
 
     let prompt = format!(

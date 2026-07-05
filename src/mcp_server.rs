@@ -26,18 +26,15 @@ mod trace;
 
 use anyhow::Result;
 use rmcp::{
-    ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{JsonObject, ServerCapabilities, ServerInfo},
-    schemars, tool, tool_handler, tool_router,
-    ServiceExt,
+    schemars, tool, tool_handler, tool_router, ServerHandler, ServiceExt,
 };
 use serde::Deserialize;
 use std::sync::Arc as StdArc;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use config::Config;
-
 
 // ── Tool inputSchema sanitizer ────────────────────────────────────────────────
 //
@@ -226,10 +223,7 @@ fn logged_stdio() -> (LoggedStdin, LoggedStdout) {
             inner: stdin,
             log: log.clone(),
         },
-        LoggedStdout {
-            inner: stdout,
-            log,
-        },
+        LoggedStdout { inner: stdout, log },
     )
 }
 
@@ -240,13 +234,19 @@ pub struct ResearchInput {
     #[schemars(description = "Research topic or question")]
     pub query: String,
 
-    #[schemars(description = "Output mode: quick (links+snippets only), summary (bullet facts), report (full markdown, default), deep (thorough long-form)")]
+    #[schemars(
+        description = "Output mode: quick (links+snippets only), summary (bullet facts), report (full markdown, default), deep (thorough long-form)"
+    )]
     pub mode: Option<String>,
 
-    #[schemars(description = "Named domain profile: shopping-ro, tech-news, llm-news, academic, news, travel")]
+    #[schemars(
+        description = "Named domain profile: shopping-ro, tech-news, llm-news, academic, news, travel"
+    )]
     pub domain_profile: Option<String>,
 
-    #[schemars(description = "Raw domain list override, e.g. [\"olx.ro\", \"reddit.com/r/LocalLLaMA\"]")]
+    #[schemars(
+        description = "Raw domain list override, e.g. [\"olx.ro\", \"reddit.com/r/LocalLLaMA\"]"
+    )]
     pub domains: Option<Vec<String>>,
 
     #[schemars(description = "Override max search sub-queries (uses config default if omitted)")]
@@ -255,7 +255,9 @@ pub struct ResearchInput {
     #[schemars(description = "Override max sources per query (uses config default if omitted)")]
     pub max_sources: Option<usize>,
 
-    #[schemars(description = "Query intent: developer-docs | news | product-research | academic | general (default). Tunes planner query style. Orthogonal to domain_profile/domains.")]
+    #[schemars(
+        description = "Query intent: developer-docs | news | product-research | academic | general (default). Tunes planner query style. Orthogonal to domain_profile/domains."
+    )]
     pub intent: Option<String>,
 }
 
@@ -264,9 +266,10 @@ pub struct PersonResearchInput {
     #[schemars(description = "Full name of the person to research, e.g. 'Maria Ionescu'")]
     pub name: String,
 
-    #[schemars(description = "Research focus: 'company' (professional background), 'personal' (interests/lifestyle), or 'both' (default)")]
+    #[schemars(
+        description = "Research focus: 'company' (professional background), 'personal' (interests/lifestyle), or 'both' (default)"
+    )]
     pub method: Option<String>,
-
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -276,31 +279,43 @@ pub struct CompanyResearchInput {
 
     #[schemars(description = "Optional country to narrow results, e.g. 'Romania'")]
     pub country: Option<String>,
-
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct JobSearchInput {
-    #[schemars(description = "Job search query, e.g. 'LLM inference engineer' or 'AI research Rust'")]
+    #[schemars(
+        description = "Job search query, e.g. 'LLM inference engineer' or 'AI research Rust'"
+    )]
     pub query: String,
 
-    #[schemars(description = "Output mode: 'list' (ranked shortlist, default) or 'deep' (shortlist + company briefs for top 5)")]
+    #[schemars(
+        description = "Output mode: 'list' (ranked shortlist, default) or 'deep' (shortlist + company briefs for top 5)"
+    )]
     pub mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CodeResearchInput {
-    #[schemars(description = "Framework or library to research, e.g. \"axum\", \"tokio\", \"claude code\"")]
+    #[schemars(
+        description = "Framework or library to research, e.g. \"axum\", \"tokio\", \"claude code\""
+    )]
     pub framework: String,
-    #[schemars(description = "Version to target, e.g. \"0.8\". Defaults to \"latest\" if omitted.")]
+    #[schemars(
+        description = "Version to target, e.g. \"0.8\". Defaults to \"latest\" if omitted."
+    )]
     pub version: Option<String>,
-    #[schemars(description = "Aspects to research: bugs, changelog, community, releases. Defaults to [\"bugs\", \"changelog\", \"community\"] if omitted.")]
+    #[schemars(
+        description = "Aspects to research: bugs, changelog, community, releases. Defaults to [\"bugs\", \"changelog\", \"community\"] if omitted."
+    )]
     pub aspects: Option<Vec<String>>,
-    #[schemars(description = "GitHub repo slug, e.g. \"tokio-rs/tokio\". Anchors bug/release queries to GitHub.")]
+    #[schemars(
+        description = "GitHub repo slug, e.g. \"tokio-rs/tokio\". Anchors bug/release queries to GitHub."
+    )]
     pub repo: Option<String>,
-    #[schemars(description = "Optional keyword to narrow results, e.g. \"middleware timeout\" or \"CORS\". Appended to every search query.")]
+    #[schemars(
+        description = "Optional keyword to narrow results, e.g. \"middleware timeout\" or \"CORS\". Appended to every search query."
+    )]
     pub query: Option<String>,
-
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -313,7 +328,6 @@ pub struct MarketInsightInput {
     pub asset_class: Option<String>,
     /// Output depth: "quick" | "summary" | "report" (default) | "deep"
     pub mode: Option<String>,
-
 }
 
 // ── Server struct ─────────────────────────────────────────────────────────────
@@ -327,31 +341,34 @@ pub struct ResearcherServer {
 #[tool_router]
 impl ResearcherServer {
     pub fn new(cfg: Config) -> Self {
-            let mut tool_router = Self::tool_router();
-            sanitize_router_schemas(&mut tool_router);
-            Self {
-                cfg: std::sync::Arc::new(cfg),
-                tool_router,
-            }
+        let mut tool_router = Self::tool_router();
+        sanitize_router_schemas(&mut tool_router);
+        Self {
+            cfg: std::sync::Arc::new(cfg),
+            tool_router,
         }
+    }
 
-    #[tool(description = "Web research agent.\nModes: quick=links+snippets, summary=bullet facts, report=full markdown (default), deep=thorough.\nProfiles: shopping-ro, tech-news, llm-news, academic, news, travel. Or pass domains:[\"site\"] directly.")]
-    async fn research(
-        &self,
-        Parameters(input): Parameters<ResearchInput>,
-    ) -> String {
+    #[tool(
+        description = "Web research agent.\nModes: quick=links+snippets, summary=bullet facts, report=full markdown (default), deep=thorough.\nProfiles: shopping-ro, tech-news, llm-news, academic, news, travel. Or pass domains:[\"site\"] directly."
+    )]
+    async fn research(&self, Parameters(input): Parameters<ResearchInput>) -> String {
         use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest, ResearchTarget};
 
         let mode = match input.mode.as_deref().unwrap_or("report") {
-            "quick"   => ResearchMode::Quick,
+            "quick" => ResearchMode::Quick,
             "summary" => ResearchMode::Summary,
-            "deep"    => ResearchMode::Deep,
-            _         => ResearchMode::Report,
+            "deep" => ResearchMode::Deep,
+            _ => ResearchMode::Report,
         };
 
         let mut cfg = (*self.cfg).clone();
-        if let Some(mq) = input.max_queries   { cfg.max_search_queries    = mq; }
-        if let Some(ms) = input.max_sources   { cfg.max_sources_per_query = ms; }
+        if let Some(mq) = input.max_queries {
+            cfg.max_search_queries = mq;
+        }
+        if let Some(ms) = input.max_sources {
+            cfg.max_sources_per_query = ms;
+        }
 
         let request = ResearchRequest {
             topic: input.query,
@@ -362,28 +379,22 @@ impl ResearcherServer {
             intent: input.intent,
         };
 
-        match run(
-            &cfg,
-            &request,
-            |ev| eprintln!("[researcher] {ev}"),
-            None,
-        ).await
-        {
-            Ok(r)  => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
+        match run(&cfg, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
+            Ok(r) => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
             Err(e) => format!("Error: {e:#}"),
         }
     }
 
-    #[tool(description = "Research a person for meeting prep. Returns a markdown brief covering professional background, career, public voice, conversation hooks, and/or personal interests depending on 'method'. Sources: LinkedIn, Twitter/X, GitHub, Facebook, Instagram, Reddit, and more.")]
-    async fn research_person(
-        &self,
-        Parameters(input): Parameters<PersonResearchInput>,
-    ) -> String {
+    #[tool(
+        description = "Research a person for meeting prep. Returns a markdown brief covering professional background, career, public voice, conversation hooks, and/or personal interests depending on 'method'. Sources: LinkedIn, Twitter/X, GitHub, Facebook, Instagram, Reddit, and more."
+    )]
+    async fn research_person(&self, Parameters(input): Parameters<PersonResearchInput>) -> String {
         use crate::researcher::pipeline::{
-            run, ResearchMode, ResearchRequest, ResearchTarget, PersonMethod,
+            run, PersonMethod, ResearchMode, ResearchRequest, ResearchTarget,
         };
 
-        let method: PersonMethod = input.method
+        let method: PersonMethod = input
+            .method
             .as_deref()
             .unwrap_or("both")
             .parse()
@@ -403,24 +414,26 @@ impl ResearcherServer {
             &request,
             |ev| eprintln!("[researcher] {ev}"),
             None,
-        ).await {
-            Ok(r)  => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
+        )
+        .await
+        {
+            Ok(r) => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
             Err(e) => format!("Error: {e:#}"),
         }
     }
 
-    #[tool(description = "Research a company for meeting prep. Returns a markdown brief covering what they do, size & stage, recent news, culture, and strategic context. Sources: LinkedIn, Crunchbase, Bloomberg, Glassdoor, Trustpilot, Wikipedia, and news.")]
+    #[tool(
+        description = "Research a company for meeting prep. Returns a markdown brief covering what they do, size & stage, recent news, culture, and strategic context. Sources: LinkedIn, Crunchbase, Bloomberg, Glassdoor, Trustpilot, Wikipedia, and news."
+    )]
     async fn research_company(
         &self,
         Parameters(input): Parameters<CompanyResearchInput>,
     ) -> String {
-        use crate::researcher::pipeline::{
-            run, ResearchMode, ResearchRequest, ResearchTarget,
-        };
+        use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest, ResearchTarget};
 
         let topic = match &input.country {
             Some(c) => format!("{} {}", input.name, c),
-            None    => input.name.clone(),
+            None => input.name.clone(),
         };
 
         let request = ResearchRequest {
@@ -437,26 +450,30 @@ impl ResearcherServer {
             &request,
             |ev| eprintln!("[researcher] {ev}"),
             None,
-        ).await {
-            Ok(r)  => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
+        )
+        .await
+        {
+            Ok(r) => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
             Err(e) => format!("Error: {e:#}"),
         }
     }
 
-    #[tool(description = "Search for remote AI engineering jobs matching your profile in profiles.toml [job-profile]. Returns a ranked markdown report. mode='list' for a quick shortlist (default), mode='deep' for full inline company briefs on top 5 matches. Sources: Remotive, Adzuna (if ADZUNA_APP_ID/KEY set), SearXNG.")]
-    async fn search_jobs(
-        &self,
-        Parameters(input): Parameters<JobSearchInput>,
-    ) -> String {
+    #[tool(
+        description = "Search for remote AI engineering jobs matching your profile in profiles.toml [job-profile]. Returns a ranked markdown report. mode='list' for a quick shortlist (default), mode='deep' for full inline company briefs on top 5 matches. Sources: Remotive, Adzuna (if ADZUNA_APP_ID/KEY set), SearXNG."
+    )]
+    async fn search_jobs(&self, Parameters(input): Parameters<JobSearchInput>) -> String {
         use crate::jobs::fetcher::fetch_jobs;
-        use crate::jobs::scorer::score_listings;
         use crate::jobs::publisher::write_job_report;
+        use crate::jobs::scorer::score_listings;
         use crate::llm::client::LlmClient;
 
         let profile = match &self.cfg.job_profile {
             Some(p) => p.clone(),
-            None => return "Error: no [job-profile] section found in profiles.toml. \
-                            Add one to enable job search.".to_string(),
+            None => {
+                return "Error: no [job-profile] section found in profiles.toml. \
+                            Add one to enable job search."
+                    .to_string()
+            }
         };
 
         let deep = input.mode.as_deref() == Some("deep");
@@ -480,32 +497,38 @@ impl ResearcherServer {
         }
     }
 
-
-    #[tool(description = "Research a framework or library: known bugs, changelogs, breaking changes, \
+    #[tool(
+        description = "Research a framework or library: known bugs, changelogs, breaking changes, \
 releases, and community sentiment. \
 aspects: bugs, changelog, community, releases — pass one or more (default: bugs+changelog+community). \
 query: optional keyword to narrow results, e.g. \"middleware timeout\" or \"CORS\". \
 repo: GitHub slug e.g. 'tokio-rs/tokio' — anchors bug/release queries to GitHub issues/releases. \
 version: e.g. '0.8' — defaults to 'latest'. \
-Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
-    async fn research_code(
-        &self,
-        Parameters(input): Parameters<CodeResearchInput>,
-    ) -> String {
-        use crate::researcher::crawler::crawl_all;
-        use crate::researcher::summarizer::summarize_all;
-        use crate::researcher::publisher::write_code_report;
+Sources: GitHub Issues, Reddit, Hacker News, official changelogs."
+    )]
+    async fn research_code(&self, Parameters(input): Parameters<CodeResearchInput>) -> String {
         use crate::llm::client::LlmClient;
+        use crate::researcher::crawler::crawl_all;
+        use crate::researcher::publisher::write_code_report;
+        use crate::researcher::summarizer::summarize_all;
 
         let version = input.version.as_deref().unwrap_or("latest");
         let framework = &input.framework;
         let aspects = input.aspects.unwrap_or_else(|| {
-            vec!["bugs".to_string(), "changelog".to_string(), "community".to_string()]
+            vec![
+                "bugs".to_string(),
+                "changelog".to_string(),
+                "community".to_string(),
+            ]
         });
 
         // Optional keyword narrows every query (e.g. "middleware timeout")
         let q = input.query.as_deref().unwrap_or("").trim().to_string();
-        let q_suffix = if q.is_empty() { String::new() } else { format!(" {q}") };
+        let q_suffix = if q.is_empty() {
+            String::new()
+        } else {
+            format!(" {q}")
+        };
 
         // Build query list from templates — no LLM planner call
         let mut queries: Vec<String> = Vec::new();
@@ -514,21 +537,29 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
                 "bugs" => {
                     queries.push(format!("{framework} {version}{q_suffix} bug issue"));
                     if let Some(repo) = &input.repo {
-                        queries.push(format!("{framework} {version}{q_suffix} issue site:github.com/{repo}/issues"));
+                        queries.push(format!(
+                            "{framework} {version}{q_suffix} issue site:github.com/{repo}/issues"
+                        ));
                     }
                 }
                 "changelog" => {
-                    queries.push(format!("{framework} {version}{q_suffix} changelog release notes"));
+                    queries.push(format!(
+                        "{framework} {version}{q_suffix} changelog release notes"
+                    ));
                     queries.push(format!("{framework} {version}{q_suffix} breaking changes"));
                 }
                 "community" => {
                     queries.push(format!("{framework} {version}{q_suffix} site:reddit.com"));
-                    queries.push(format!("{framework} {version}{q_suffix} site:news.ycombinator.com"));
+                    queries.push(format!(
+                        "{framework} {version}{q_suffix} site:news.ycombinator.com"
+                    ));
                 }
                 "releases" => {
                     queries.push(format!("{framework} {version}{q_suffix} release"));
                     if let Some(repo) = &input.repo {
-                        queries.push(format!("{framework} {version}{q_suffix} site:github.com/{repo}/releases"));
+                        queries.push(format!(
+                            "{framework} {version}{q_suffix} site:github.com/{repo}/releases"
+                        ));
                     }
                 }
                 _ => {} // silently skip unknown aspects
@@ -549,12 +580,14 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
 
         let summaries = summarize_all(&llm, &sources, &topic).await;
         if summaries.is_empty() {
-            return format!("Error: could not summarize sources for {framework} {version}{q_suffix}");
+            return format!(
+                "Error: could not summarize sources for {framework} {version}{q_suffix}"
+            );
         }
 
         match write_code_report(&llm, &summaries, framework, version, &aspects).await {
             Ok(report) => report,
-            Err(e)     => format!("Error writing report: {e:#}"),
+            Err(e) => format!("Error writing report: {e:#}"),
         }
     }
 
@@ -562,10 +595,7 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
         query: ticker (BTC, NVDA) or topic (AI chip stocks). \
         asset_class: stock | crypto | macro (default: macro). \
         mode: quick | summary | report (default) | deep.")]
-    async fn market_insight(
-        &self,
-        Parameters(input): Parameters<MarketInsightInput>,
-    ) -> String {
+    async fn market_insight(&self, Parameters(input): Parameters<MarketInsightInput>) -> String {
         use crate::researcher::pipeline::{
             run, AssetClass, ResearchMode, ResearchRequest, ResearchTarget,
         };
@@ -601,18 +631,19 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
             &request,
             |ev| eprintln!("[researcher] {ev}"),
             None,
-        ).await {
-            Ok(r)  => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
+        )
+        .await
+        {
+            Ok(r) => serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string()),
             Err(e) => format!("Error: {e:#}"),
         }
     }
-
 }
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for ResearcherServer {
     fn get_info(&self) -> ServerInfo {
-            ServerInfo::new(
+        ServerInfo::new(
                 ServerCapabilities::builder()
                     .enable_tools()
                     .build(),
@@ -690,7 +721,7 @@ impl ServerHandler for ResearcherServer {
                  Runs are traced to Langfuse when LANGFUSE_HOST + keys are set (see env).\n\
                  ".to_string(),
             )
-        }
+    }
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -806,10 +837,10 @@ fn config_from_env() -> Config {
         cli_domains: vec![],
         profiles: crate::config::load_profiles(),
         auth: config::AuthConfig {
-            linkedin_cookie:  std::env::var("LINKEDIN_COOKIE").ok(),
-            fb_cookie:        std::env::var("FB_COOKIE").ok(),
+            linkedin_cookie: std::env::var("LINKEDIN_COOKIE").ok(),
+            fb_cookie: std::env::var("FB_COOKIE").ok(),
             instagram_cookie: std::env::var("INSTAGRAM_COOKIE").ok(),
-            twitter_cookie:   std::env::var("TWITTER_COOKIE").ok(),
+            twitter_cookie: std::env::var("TWITTER_COOKIE").ok(),
         },
         job_profile: config::load_job_profile(),
         progressive_disclosure_chars: env_usize("PROGRESSIVE_DISCLOSURE_CHARS", 4000),
@@ -852,5 +883,4 @@ mod langfuse_config_tests {
         assert!(cfg.judge_enabled);
         std::env::remove_var("LLM_JUDGE_ENABLED");
     }
-
 }

@@ -17,10 +17,10 @@ use clap::Parser;
 
 #[derive(Debug, Clone, Default)]
 pub struct AuthConfig {
-    pub linkedin_cookie:  Option<String>,
-    pub fb_cookie:        Option<String>,
+    pub linkedin_cookie: Option<String>,
+    pub fb_cookie: Option<String>,
     pub instagram_cookie: Option<String>,
-    pub twitter_cookie:   Option<String>,
+    pub twitter_cookie: Option<String>,
 }
 
 impl AuthConfig {
@@ -39,7 +39,6 @@ impl AuthConfig {
         }
     }
 }
-
 
 /// Researcher config — all values can come from env vars or CLI flags.
 #[derive(Debug, Clone, Parser)]
@@ -87,7 +86,6 @@ pub struct Config {
     pub strip_thinking_tokens: bool,
 
     // ── Fast LLM backend (structured tasks: planner, summarizer) ────────────
-
     /// Base URL for the fast/lightweight LLM backend (structured tasks).
     /// Empty string = fall back to LLM_BASE_URL.
     #[arg(long, env = "LLM_FAST_BASE_URL", default_value = "")]
@@ -293,7 +291,6 @@ pub fn load_job_profile() -> Option<JobProfile> {
         .inspect_err(|e| tracing::warn!(error = %e, "failed to parse [job-profile] section"))
         .ok()
 }
-
 
 /// Load domain profiles from `profiles.toml` in the current directory.
 /// Returns empty map if the file is missing or malformed.

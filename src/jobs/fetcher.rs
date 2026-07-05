@@ -38,17 +38,28 @@ async fn fetch_remotive(http: &Client, query: &str) -> Vec<JobListing> {
         "https://remotive.com/api/remote-jobs?search={}&limit=20",
         urlencoding::encode(query)
     );
-    let Ok(resp) = http.get(&url).send().await else { return vec![] };
-    let Ok(data) = resp.json::<RemotiveResponse>().await else { return vec![] };
+    let Ok(resp) = http.get(&url).send().await else {
+        return vec![];
+    };
+    let Ok(data) = resp.json::<RemotiveResponse>().await else {
+        return vec![];
+    };
 
-    data.jobs.into_iter().map(|j| JobListing {
-        title: j.title,
-        company: j.company_name,
-        url: j.url,
-        salary: if j.salary.is_empty() { None } else { Some(j.salary) },
-        description: truncate(&j.description, 400),
-        source: "remotive".to_string(),
-    }).collect()
+    data.jobs
+        .into_iter()
+        .map(|j| JobListing {
+            title: j.title,
+            company: j.company_name,
+            url: j.url,
+            salary: if j.salary.is_empty() {
+                None
+            } else {
+                Some(j.salary)
+            },
+            description: truncate(&j.description, 400),
+            source: "remotive".to_string(),
+        })
+        .collect()
 }
 
 // ── Adzuna ────────────────────────────────────────────────────────────────────
@@ -85,26 +96,38 @@ async fn fetch_adzuna(http: &Client, query: &str, app_id: &str, app_key: &str) -
          &content-type=application/json",
         urlencoding::encode(query)
     );
-    let Ok(resp) = http.get(&url).send().await else { return vec![] };
-    let Ok(data) = resp.json::<AdzunaResponse>().await else { return vec![] };
+    let Ok(resp) = http.get(&url).send().await else {
+        return vec![];
+    };
+    let Ok(data) = resp.json::<AdzunaResponse>().await else {
+        return vec![];
+    };
 
-    data.results.into_iter().map(|j| JobListing {
-        title: j.title,
-        company: j.company.display_name,
-        url: j.redirect_url,
-        salary: match (j.salary_min, j.salary_max) {
-            (Some(lo), Some(hi)) => Some(format!("${:.0}–${:.0}", lo, hi)),
-            (Some(lo), None)     => Some(format!("${:.0}+", lo)),
-            _                    => None,
-        },
-        description: truncate(&j.description, 400),
-        source: "adzuna".to_string(),
-    }).collect()
+    data.results
+        .into_iter()
+        .map(|j| JobListing {
+            title: j.title,
+            company: j.company.display_name,
+            url: j.redirect_url,
+            salary: match (j.salary_min, j.salary_max) {
+                (Some(lo), Some(hi)) => Some(format!("${:.0}–${:.0}", lo, hi)),
+                (Some(lo), None) => Some(format!("${:.0}+", lo)),
+                _ => None,
+            },
+            description: truncate(&j.description, 400),
+            source: "adzuna".to_string(),
+        })
+        .collect()
 }
 
 // ── SearXNG ───────────────────────────────────────────────────────────────────
 
-async fn fetch_searxng(http: &Client, cfg: &Config, query: &str, profile: &JobProfile) -> Vec<JobListing> {
+async fn fetch_searxng(
+    http: &Client,
+    cfg: &Config,
+    query: &str,
+    profile: &JobProfile,
+) -> Vec<JobListing> {
     let remote_clause = if profile.remote_only { " remote" } else { "" };
     let full_query = format!("{query}{remote_clause} job opening");
 
@@ -114,26 +137,38 @@ async fn fetch_searxng(http: &Client, cfg: &Config, query: &str, profile: &JobPr
         &cfg.brave_api_key,
         &cfg.tavily_api_key,
         &cfg.exa_api_key,
-        &[],    // job search has no domain filtering
-        None,   // job search is not profile-driven
+        &[],  // job search has no domain filtering
+        None, // job search is not profile-driven
         &full_query,
         cfg.search_results_per_query,
-    ).await else { return vec![] };
+    )
+    .await
+    else {
+        return vec![];
+    };
 
-    results.into_iter().map(|r| JobListing {
-        title: r.title.clone(),
-        company: extract_company_from_title(&r.title),
-        url: r.url,
-        salary: None,
-        description: truncate(&r.snippet, 400),
-        source: "searxng".to_string(),
-    }).collect()
+    results
+        .into_iter()
+        .map(|r| JobListing {
+            title: r.title.clone(),
+            company: extract_company_from_title(&r.title),
+            url: r.url,
+            salary: None,
+            description: truncate(&r.snippet, 400),
+            source: "searxng".to_string(),
+        })
+        .collect()
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Fetch job listings from all configured sources, merge, and deduplicate by URL.
-pub async fn fetch_jobs(http: &Client, cfg: &Config, query: &str, profile: &JobProfile) -> Vec<JobListing> {
+pub async fn fetch_jobs(
+    http: &Client,
+    cfg: &Config,
+    query: &str,
+    profile: &JobProfile,
+) -> Vec<JobListing> {
     info!(%query, "fetching job listings");
 
     let (remotive, adzuna, searxng) = tokio::join!(
@@ -170,14 +205,23 @@ fn truncate(s: &str, max: usize) -> String {
     let mut in_tag = false;
     for c in s.chars() {
         match c {
-            '<' => { in_tag = true; clean.push(' '); }
-            '>' => { in_tag = false; }
+            '<' => {
+                in_tag = true;
+                clean.push(' ');
+            }
+            '>' => {
+                in_tag = false;
+            }
             _ if !in_tag => clean.push(c),
             _ => {}
         }
     }
     let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
-    if clean.len() <= max { clean } else { format!("{}…", &clean[..max]) }
+    if clean.len() <= max {
+        clean
+    } else {
+        format!("{}…", &clean[..max])
+    }
 }
 
 fn extract_company_from_title(title: &str) -> String {

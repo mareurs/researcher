@@ -1,8 +1,8 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::llm::client::{ChatMessage, LlmClient};
 use super::crawler::ScrapedSource;
+use crate::llm::client::{ChatMessage, LlmClient};
 
 #[derive(Debug, Clone)]
 pub struct SourceSummary {
@@ -12,7 +12,6 @@ pub struct SourceSummary {
     pub summary: String,
 }
 
-
 #[derive(serde::Deserialize)]
 struct JudgedSummary {
     relevant: bool,
@@ -21,7 +20,11 @@ struct JudgedSummary {
 }
 
 /// Summarize a single scraped source in context of the sub-question it answers.
-async fn summarize_source(llm: &LlmClient, source: &ScrapedSource, topic: &str) -> Result<Option<SourceSummary>> {
+async fn summarize_source(
+    llm: &LlmClient,
+    source: &ScrapedSource,
+    topic: &str,
+) -> Result<Option<SourceSummary>> {
     let messages = vec![
         ChatMessage::system(
             "/no_think\n\
@@ -101,7 +104,11 @@ pub async fn summarize_all(
     // Limit concurrency to avoid overwhelming llama.cpp (PARALLEL=2 on heavy, 4 on fast).
     // join_all sends everything at once and causes HTTP failures when the queue fills.
     const MAX_CONCURRENT: usize = 3;
-    debug!(count = sources.len(), concurrency = MAX_CONCURRENT, "summarizing sources");
+    debug!(
+        count = sources.len(),
+        concurrency = MAX_CONCURRENT,
+        "summarizing sources"
+    );
 
     // Clone into owned vec so futures are 'static and buffer_unordered works.
     let owned: Vec<ScrapedSource> = sources.to_vec();

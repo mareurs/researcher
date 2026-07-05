@@ -7,11 +7,7 @@ use super::searxng::SearchResult;
 
 /// DuckDuckGo Lite — no JS, no API key, scrapes the lite HTML endpoint.
 /// Used as a fallback when SearXNG is unavailable.
-pub async fn search(
-    http: &Client,
-    query: &str,
-    num_results: usize,
-) -> Result<Vec<SearchResult>> {
+pub async fn search(http: &Client, query: &str, num_results: usize) -> Result<Vec<SearchResult>> {
     debug!(%query, "DuckDuckGo lite search");
 
     let resp = http

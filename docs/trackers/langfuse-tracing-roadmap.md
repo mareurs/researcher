@@ -116,10 +116,37 @@ Each item below is a discrete follow-up. Full detail:
 
 ## History
 
+### 2026-07-05 — T-8 code complete; live verification blocked on an upstream Langfuse bug
+
+Implemented T-8 (LLM-judge auto-scoring) via subagent-driven-development, 4
+tasks: `LLM_JUDGE_ENABLED` config flag, `score_create` wire-layer tests, the
+`judge` module (builds its own untraced `LlmClient` + one-shot
+`LangfuseClient`, taking only `trace_id: &str` — never a `ResearchTrace`
+clone), and the pipeline hook (detached `tokio::spawn` after `write-report`).
+All 4 tasks reviewed clean. One concurrent, unrelated fix (`9e055d3`, "T-14")
+landed mid-execution from another session on this same repo and changed
+`ResearchTrace::from_config` to return a flush `JoinHandle` that `run()`
+now awaits before returning — the judge design was adjusted to avoid ever
+holding a `ResearchTrace` clone in its detached task, so it can't block that
+await. Also fixed an unrelated flaky test surfaced along the way
+(`config_from_env_judge_enabled_via_env` racing on a global env var).
+
+Live end-to-end verification (real query → 4 scores visible in Langfuse)
+could not be completed: `score-create` events are accepted by Langfuse's
+ingestion API (`201`) but never become queryable via `GET /api/public/scores`
+or persisted in ClickHouse's `scores` table (confirmed `0` rows for any
+project, vs. `traces`/`observations` having tens of thousands) — reproduced
+with a raw `curl` POST independent of our Rust code, and confirmed via the
+worker's own compiled source that no validation-failure path is being hit.
+Restarting the `langfuse-worker` container didn't help. This is an upstream
+bug in the shared self-hosted Langfuse instance (v3.174.1), not in T-8's
+code — filed as https://github.com/langfuse/langfuse/issues/14797. T-8 is
+code-complete and merged; re-run the smoke test once that issue is fixed to
+close out live verification.
+
 ### 2026-07-04 — roadmap created
 
 Brainstormed the tracing design; chose reuse-instance/new-project + app-level
 Rust client (approach A). Phase 1 (v1) scoped into the design spec; Phase 2
 items T-7..T-12 captured here. Per-URL scrape spans (T-7) and LLM-judge scoring
 (T-8) explicitly deferred out of v1 by decision.
-

@@ -27,10 +27,10 @@ async fn main() -> anyhow::Result<()> {
     let mut cfg = Config::parse();
     cfg.profiles = crate::config::load_profiles();
     cfg.auth = config::AuthConfig {
-        linkedin_cookie:  std::env::var("LINKEDIN_COOKIE").ok(),
-        fb_cookie:        std::env::var("FB_COOKIE").ok(),
+        linkedin_cookie: std::env::var("LINKEDIN_COOKIE").ok(),
+        fb_cookie: std::env::var("FB_COOKIE").ok(),
         instagram_cookie: std::env::var("INSTAGRAM_COOKIE").ok(),
-        twitter_cookie:   std::env::var("TWITTER_COOKIE").ok(),
+        twitter_cookie: std::env::var("TWITTER_COOKIE").ok(),
     };
     cfg.job_profile = config::load_job_profile();
 
@@ -63,10 +63,10 @@ async fn run_cli(cfg: Config) -> anyhow::Result<()> {
     eprintln!("\n🔬 Researcher\n   {}\n", topic);
 
     let mode = match cfg.mode.as_str() {
-        "quick"   => ResearchMode::Quick,
+        "quick" => ResearchMode::Quick,
         "summary" => ResearchMode::Summary,
-        "deep"    => ResearchMode::Deep,
-        _         => ResearchMode::Report,
+        "deep" => ResearchMode::Deep,
+        _ => ResearchMode::Report,
     };
 
     let request = ResearchRequest {
@@ -91,13 +91,18 @@ async fn run_cli(cfg: Config) -> anyhow::Result<()> {
         }
     });
 
-    let result = run(&cfg, &request, |event| {
-        eprintln!("  {event}");
-        // Print a blank line before report starts streaming
-        if matches!(event, pipeline::ProgressEvent::WritingReport) {
-            eprintln!();
-        }
-    }, Some(token_tx))
+    let result = run(
+        &cfg,
+        &request,
+        |event| {
+            eprintln!("  {event}");
+            // Print a blank line before report starts streaming
+            if matches!(event, pipeline::ProgressEvent::WritingReport) {
+                eprintln!();
+            }
+        },
+        Some(token_tx),
+    )
     .await?;
 
     // Wait for all tokens to be printed

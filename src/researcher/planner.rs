@@ -9,14 +9,14 @@ fn disambiguate_topic(topic: &str) -> String {
     // (term, replacement) — order matters: more specific first to avoid double-expanding.
     // The Rust `regex` crate does not support lookbehind; use \b word boundaries instead.
     const TECH_TERMS: &[(&str, &str)] = &[
-        ("Rust lang",                  "Rust programming language"),
-        ("Rust",                       "Rust programming language"),
-        ("Golang",                     "Go programming language"),
-        ("Swift",                      "Swift programming language"),
-        ("Haskell",                    "Haskell programming language"),
-        ("Elixir",                     "Elixir programming language"),
-        ("Crystal",                    "Crystal programming language"),
-        ("Nim",                        "Nim programming language"),
+        ("Rust lang", "Rust programming language"),
+        ("Rust", "Rust programming language"),
+        ("Golang", "Go programming language"),
+        ("Swift", "Swift programming language"),
+        ("Haskell", "Haskell programming language"),
+        ("Elixir", "Elixir programming language"),
+        ("Crystal", "Crystal programming language"),
+        ("Nim", "Nim programming language"),
     ];
 
     let mut result = topic.to_string();
@@ -34,30 +34,29 @@ fn disambiguate_topic(topic: &str) -> String {
     result
 }
 
-
 /// Expands well-known ticker symbols to their full name for better search quality.
 /// E.g. "BTC" → "Bitcoin", "NVDA" → "Nvidia".
 fn expand_ticker(topic: &str) -> String {
     const TICKERS: &[(&str, &str)] = &[
-        ("BTC",   "Bitcoin"),
-        ("ETH",   "Ethereum"),
-        ("SOL",   "Solana"),
-        ("BNB",   "Binance Coin"),
-        ("XRP",   "Ripple XRP"),
-        ("ADA",   "Cardano"),
-        ("DOGE",  "Dogecoin"),
-        ("AVAX",  "Avalanche"),
-        ("NVDA",  "Nvidia"),
-        ("AAPL",  "Apple"),
-        ("MSFT",  "Microsoft"),
+        ("BTC", "Bitcoin"),
+        ("ETH", "Ethereum"),
+        ("SOL", "Solana"),
+        ("BNB", "Binance Coin"),
+        ("XRP", "Ripple XRP"),
+        ("ADA", "Cardano"),
+        ("DOGE", "Dogecoin"),
+        ("AVAX", "Avalanche"),
+        ("NVDA", "Nvidia"),
+        ("AAPL", "Apple"),
+        ("MSFT", "Microsoft"),
         ("GOOGL", "Google Alphabet"),
-        ("META",  "Meta Platforms"),
-        ("AMZN",  "Amazon"),
-        ("TSLA",  "Tesla"),
-        ("AMD",   "AMD Advanced Micro Devices"),
-        ("INTC",  "Intel"),
-        ("SPY",   "S&P 500 ETF"),
-        ("QQQ",   "Nasdaq 100 ETF"),
+        ("META", "Meta Platforms"),
+        ("AMZN", "Amazon"),
+        ("TSLA", "Tesla"),
+        ("AMD", "AMD Advanced Micro Devices"),
+        ("INTC", "Intel"),
+        ("SPY", "S&P 500 ETF"),
+        ("QQQ", "Nasdaq 100 ETF"),
     ];
     let mut result = topic.to_string();
     // TODO: cache compiled regexes with std::sync::LazyLock to avoid re-compiling on every call
@@ -73,33 +72,36 @@ fn expand_ticker(topic: &str) -> String {
     }
     result
 }
-    // TODO: cache compiled regexes with std::sync::LazyLock to avoid re-compiling on every call
+// TODO: cache compiled regexes with std::sync::LazyLock to avoid re-compiling on every call
 
 fn intent_prefix(intent: Option<&str>) -> &'static str {
     match intent {
-        Some("developer-docs") =>
+        Some("developer-docs") => {
             "Write precise, keyword-dense queries targeting developer documentation. \
              Use exact API names, endpoint paths, SDK method names, and version numbers \
              where relevant. Prefer terms that match what technical doc pages actually \
-             contain (e.g. \"REST API authentication bearer token\" over \"how to log in\").\n\n",
-        Some("news") =>
+             contain (e.g. \"REST API authentication bearer token\" over \"how to log in\").\n\n"
+        }
+        Some("news") => {
             "Write journalistic-style queries focused on recent events. \
              Include named entities (people, organizations, products), use temporal \
              context (e.g. \"2026\", \"latest\", \"announced\"), and prefer queries that \
-             surface news articles and press releases over evergreen content.\n\n",
-        Some("product-research") =>
+             surface news articles and press releases over evergreen content.\n\n"
+        }
+        Some("product-research") => {
             "Write queries that surface product pages, user reviews, and comparisons. \
              Include product names, model numbers, competitor names, and intent signals \
-             like \"review\", \"vs\", \"pricing\", \"alternatives\".\n\n",
-        Some("academic") =>
+             like \"review\", \"vs\", \"pricing\", \"alternatives\".\n\n"
+        }
+        Some("academic") => {
             "Write scholarly queries using field-specific terminology. \
              Include technical concepts, methodology names, and author or paper title \
              fragments where relevant. Prefer queries that match abstract/paper language \
-             over general-audience explanations.\n\n",
+             over general-audience explanations.\n\n"
+        }
         _ => "",
     }
 }
-
 
 /// Ask the LLM to decompose a research query into focused sub-questions.
 /// Returns a list of search queries to run in parallel.
@@ -114,7 +116,7 @@ pub async fn generate_queries(
     let topic = &disambiguate_topic(topic);
     info!(%topic, "planning research queries");
 
-    use crate::researcher::pipeline::{ResearchTarget, PersonMethod};
+    use crate::researcher::pipeline::{PersonMethod, ResearchTarget};
 
     let system_prompt = match target {
         ResearchTarget::Person { method } => {
@@ -211,7 +213,10 @@ pub async fn generate_queries(
     };
 
     let messages = vec![
-        ChatMessage::system(format!("/no_think\n{}{system_prompt}", intent_prefix(intent))),
+        ChatMessage::system(format!(
+            "/no_think\n{}{system_prompt}",
+            intent_prefix(intent)
+        )),
         ChatMessage::user(format!(
             "Research topic: {display_topic}\n\n\
              Generate exactly {max_queries} distinct search queries to research this topic \
@@ -224,7 +229,11 @@ pub async fn generate_queries(
 
     let queries: Vec<String> = response
         .lines()
-        .map(|l| l.trim().trim_start_matches(['-', '*', '•', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.', ')', '"']))
+        .map(|l| {
+            l.trim().trim_start_matches([
+                '-', '*', '•', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.', ')', '"',
+            ])
+        })
         .map(|l| l.trim_end_matches(['"', '.', ',']))
         .map(str::trim)
         .filter(|l| !l.is_empty() && l.len() > 5)
@@ -255,8 +264,10 @@ pub async fn broaden_queries(
     let failed_list = failed_queries.join("\n");
 
     let domain_instruction = if !domains.is_empty()
-        && !matches!(target, ResearchTarget::Person { .. } | ResearchTarget::Company | ResearchTarget::Market { .. })
-    {
+        && !matches!(
+            target,
+            ResearchTarget::Person { .. } | ResearchTarget::Company | ResearchTarget::Market { .. }
+        ) {
         let domain_list = domains
             .iter()
             .map(|d| format!("site:{d}"))
@@ -301,7 +312,11 @@ pub async fn broaden_queries(
 
     let queries: Vec<String> = response
         .lines()
-        .map(|l| l.trim().trim_start_matches(['-', '*', '•', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.', ')', '"']))
+        .map(|l| {
+            l.trim().trim_start_matches([
+                '-', '*', '•', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.', ')', '"',
+            ])
+        })
         .map(|l| l.trim_end_matches(['"', '.', ',']))
         .map(str::trim)
         .filter(|l| !l.is_empty() && l.len() > 5)

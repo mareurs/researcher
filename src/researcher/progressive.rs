@@ -1,8 +1,8 @@
-use std::path::PathBuf;
-use anyhow::Result;
-use chrono::Local;
 use crate::llm::client::{ChatMessage, LlmClient};
 use crate::researcher::pipeline::ResearchResult;
+use anyhow::Result;
+use chrono::Local;
+use std::path::PathBuf;
 
 #[derive(Debug, serde::Serialize)]
 pub struct ProgressiveEnvelope {
@@ -75,7 +75,9 @@ pub async fn generate_summary(llm: &LlmClient, report: &str, style: &str) -> Res
     };
 
     let messages = vec![
-        ChatMessage::system("You are a research analyst. Summarize research reports concisely and accurately."),
+        ChatMessage::system(
+            "You are a research analyst. Summarize research reports concisely and accurately.",
+        ),
         ChatMessage::user(prompt),
     ];
     llm.complete(messages).await
@@ -91,19 +93,25 @@ pub async fn maybe_disclose(
     let report = match &result.report {
         Some(r) => r,
         None => {
-            return Ok(MaybeDisclosed::Inline(serde_json::to_string_pretty(result)?));
+            return Ok(MaybeDisclosed::Inline(serde_json::to_string_pretty(
+                result,
+            )?));
         }
     };
 
     if threshold == 0 || report.len() <= threshold {
-        return Ok(MaybeDisclosed::Inline(serde_json::to_string_pretty(result)?));
+        return Ok(MaybeDisclosed::Inline(serde_json::to_string_pretty(
+            result,
+        )?));
     }
 
     let path = match write_to_disk(topic, report) {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!("progressive disclosure: disk write failed ({e:#}), returning inline");
-            return Ok(MaybeDisclosed::Inline(serde_json::to_string_pretty(result)?));
+            return Ok(MaybeDisclosed::Inline(serde_json::to_string_pretty(
+                result,
+            )?));
         }
     };
 
@@ -123,7 +131,9 @@ pub async fn maybe_disclose(
         hint: "Full report saved to disk. Read the file at 'path' using a file-reading tool, or read specific sections by heading.",
     };
 
-    Ok(MaybeDisclosed::Progressive(serde_json::to_string_pretty(&envelope)?))
+    Ok(MaybeDisclosed::Progressive(serde_json::to_string_pretty(
+        &envelope,
+    )?))
 }
 
 #[cfg(test)]
@@ -137,11 +147,14 @@ mod tests {
     fn extract_toc_returns_h2_headings() {
         let report = "# Title\n\nSome text.\n\n## Executive Summary\n\nMore.\n\n## Key Findings\n\n- foo\n\n### Subsection\n\n## Sources\n";
         let toc = extract_toc(report);
-        assert_eq!(toc, vec![
-            "## Executive Summary".to_string(),
-            "## Key Findings".to_string(),
-            "## Sources".to_string(),
-        ]);
+        assert_eq!(
+            toc,
+            vec![
+                "## Executive Summary".to_string(),
+                "## Key Findings".to_string(),
+                "## Sources".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -175,6 +188,8 @@ mod tests {
         std::env::set_var("HOME", dir.path());
         let path = write_to_disk("Rust async/await: deep dive!", "content").unwrap();
         let name = path.file_name().unwrap().to_str().unwrap();
-        assert!(name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '.'));
+        assert!(name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '.'));
     }
 }

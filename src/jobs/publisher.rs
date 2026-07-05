@@ -1,9 +1,9 @@
 use anyhow::Result;
 use tracing::info;
 
+use super::scorer::ScoredJob;
 use crate::config::Config;
 use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest, ResearchTarget};
-use super::scorer::ScoredJob;
 
 /// Render a job search report in list or deep mode.
 /// Deep mode calls research_company for each top-N company in parallel.
@@ -14,15 +14,18 @@ pub async fn write_job_report(
     deep: bool,
 ) -> Result<String> {
     if jobs.is_empty() {
-        return Ok(format!("# Job Search: \"{query}\"\n\nNo matching jobs found."));
+        return Ok(format!(
+            "# Job Search: \"{query}\"\n\nNo matching jobs found."
+        ));
     }
 
     info!(count = jobs.len(), deep, "writing job report");
 
     // Company briefs for deep mode — top 5 in parallel
-    let company_briefs: Vec<Option<String>> = if deep {
-        let top_n = jobs.len().min(5);
-        let futs: Vec<_> = jobs[..top_n].iter().map(|j| {
+    let company_briefs: Vec<Option<String>> =
+        if deep {
+            let top_n = jobs.len().min(5);
+            let futs: Vec<_> = jobs[..top_n].iter().map(|j| {
             let company = j.listing.company.clone();
             let cfg = cfg.clone();
             async move {
@@ -45,15 +48,15 @@ pub async fn write_job_report(
             }
         }).collect();
 
-        let mut briefs = futures::future::join_all(futs).await;
-        // Pad with None for jobs beyond top_n
-        while briefs.len() < jobs.len() {
-            briefs.push(None);
-        }
-        briefs
-    } else {
-        vec![None; jobs.len()]
-    };
+            let mut briefs = futures::future::join_all(futs).await;
+            // Pad with None for jobs beyond top_n
+            while briefs.len() < jobs.len() {
+                briefs.push(None);
+            }
+            briefs
+        } else {
+            vec![None; jobs.len()]
+        };
 
     // Markdown table header
     let mut out = format!("# Job Search: \"{query}\" — {} matches\n\n", jobs.len());
@@ -63,7 +66,12 @@ pub async fn write_job_report(
         let salary = j.listing.salary.as_deref().unwrap_or("—");
         out.push_str(&format!(
             "| {} | {} | {} | {} | ⭐ {}/10 | [link]({}) |\n",
-            i + 1, j.listing.title, j.listing.company, salary, j.score, j.listing.url
+            i + 1,
+            j.listing.title,
+            j.listing.company,
+            salary,
+            j.score,
+            j.listing.url
         ));
     }
     out.push('\n');
