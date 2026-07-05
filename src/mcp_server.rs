@@ -720,7 +720,6 @@ async fn dispatch_jobs(cfg: std::sync::Arc<Config>, input: ResearchInput) -> Str
     }
 }
 
-
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for ResearcherServer {
     fn get_info(&self) -> ServerInfo {

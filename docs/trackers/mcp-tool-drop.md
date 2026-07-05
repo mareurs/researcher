@@ -187,3 +187,21 @@ After full CC restart in a fresh terminal, traffic log captured a clean handshak
 New ops procedure: after `cargo build --release` of `researcher-mcp`, every active CC session that has it bound must either (a) `/mcp` reconnect (respawns child off new binary) or (b) be killed via `pkill -f target/release/researcher-mcp` followed by `/mcp` reconnect.
 
 This finding turned the lights on for the original symptom: the schema-validation hypothesis was correct, but the visible failure mode in interactive use was "fix shipped, restart-flow incomplete" — not a residual schema bug. Confirmed end-to-end working: `pkill -f` of all `(deleted)`-exe children → `/mcp` reconnect → `mcp__researcher__research` available and live call returned 16 sources.
+
+### 2026-07-05 — fix silently reverted by unrelated checkpoint commit, then restored
+
+Commit `9b8d460` ("checkpoint: Vertex provider + mcp_server refactor + search/embeddings
+updates", 2026-07-04) touched `src/mcp_server.rs` by 986 lines while checkpointing dirty
+working-tree state before starting Langfuse tracing work. As a side effect it downgraded
+`rmcp` from `1.5` back to `1.1` and removed `sanitize_router_schemas`, the
+`#[tool_handler(router = self.tool_router)]` wiring, and `serverInfo.name = "researcher"` —
+i.e. this exact bug's fix — along with unrelated reverts of the unified `research` tool and
+progressive disclosure. Root cause: a stale local checkout used for Vertex-provider work was
+committed as-is without diffing against the unification/disclosure work that had landed in
+the interim.
+
+Recovered in `docs/superpowers/plans/2026-07-05-mcp-server-regression-recovery.md`, plus a
+new `cargo test` regression guard (`schema_sanitizer_tests::tool_router_schema_has_no_zod_hostile_fields`)
+that fails the build if the sanitizer is ever dropped again — this class of regression
+previously had no test coverage, only the (git-ignored, uncommitted) design docs as a paper
+trail.
