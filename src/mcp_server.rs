@@ -28,16 +28,210 @@ use anyhow::Result;
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{ServerCapabilities, ServerInfo},
+    model::{JsonObject, ServerCapabilities, ServerInfo},
     schemars, tool, tool_handler, tool_router,
-    transport::stdio,
     ServiceExt,
 };
 use serde::Deserialize;
+use std::sync::Arc as StdArc;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use config::Config;
 
+
+// ── Tool inputSchema sanitizer ────────────────────────────────────────────────
+//
+// rmcp 1.1 + schemars derive produces shapes Claude Code's Zod-based tool
+// parser silently rejects (tool drops from function list while server stays
+// connected — see docs/trackers/mcp-tool-drop.md). We rewrite the schema once
+// at startup so CC accepts it:
+//   - drop `$schema` (top-level + nested)
+//   - drop `default: null`
+//   - `format: "uint"` → omit format, ensure `minimum: 0`
+//   - `type: ["X", "null"]` → `type: "X"` (Option<T> nullability is implicit)
+
+fn sanitize_router_schemas(router: &mut ToolRouter<ResearcherServer>) {
+    let old = std::mem::take(router);
+    for mut route in old {
+        let mut owned: JsonObject = (*route.attr.input_schema).clone();
+        owned.remove("$schema");
+        let mut as_val = serde_json::Value::Object(owned);
+        clean_schema_value(&mut as_val);
+        if let serde_json::Value::Object(obj) = as_val {
+            route.attr.input_schema = StdArc::new(obj);
+        }
+        router.add_route(route);
+    }
+}
+
+fn clean_schema_value(v: &mut serde_json::Value) {
+    match v {
+        serde_json::Value::Object(map) => {
+            map.remove("$schema");
+            if matches!(map.get("title"), Some(serde_json::Value::String(_))) {
+                map.remove("title");
+            }
+            if matches!(map.get("default"), Some(serde_json::Value::Null)) {
+                map.remove("default");
+            }
+            if matches!(map.get("format"), Some(serde_json::Value::String(s)) if s == "uint") {
+                map.remove("format");
+                map.entry("minimum")
+                    .or_insert(serde_json::Value::Number(0.into()));
+            }
+            if let Some(serde_json::Value::Array(types)) = map.get("type").cloned() {
+                let non_null: Vec<_> = types
+                    .into_iter()
+                    .filter(|t| t != &serde_json::Value::String("null".into()))
+                    .collect();
+                match non_null.len() {
+                    1 => {
+                        map.insert("type".into(), non_null.into_iter().next().unwrap());
+                    }
+                    n if n > 1 => {
+                        map.insert("type".into(), serde_json::Value::Array(non_null));
+                    }
+                    _ => {}
+                }
+            }
+            for child in map.values_mut() {
+                clean_schema_value(child);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for child in arr.iter_mut() {
+                clean_schema_value(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+// ── stdio traffic logger ──────────────────────────────────────────────────────
+//
+// Wraps tokio::io::{Stdin,Stdout} so every byte CC sends to us (and we send
+// back) gets appended to a file with millisecond timestamps and direction
+// markers. Enabled by setting `MCP_LOG_TRAFFIC=/path/to/log` in the server env.
+// Disabled (zero overhead) when the env var is unset or empty.
+
+#[derive(Clone)]
+struct TrafficLog {
+    file: std::sync::Arc<std::sync::Mutex<std::fs::File>>,
+}
+
+impl TrafficLog {
+    fn from_env() -> Option<Self> {
+        let path = std::env::var("MCP_LOG_TRAFFIC").ok()?;
+        let path = path.trim();
+        if path.is_empty() {
+            return None;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|e| eprintln!("MCP_LOG_TRAFFIC open {path} failed: {e}"))
+            .ok()?;
+        let log = TrafficLog {
+            file: std::sync::Arc::new(std::sync::Mutex::new(file)),
+        };
+        log.write_line("--- session start ---");
+        Some(log)
+    }
+
+    fn write_line(&self, line: &str) {
+        use std::io::Write;
+        if let Ok(mut f) = self.file.lock() {
+            let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ");
+            let _ = writeln!(f, "[{ts}] {line}");
+        }
+    }
+
+    fn log_bytes(&self, dir: &str, bytes: &[u8]) {
+        let s = String::from_utf8_lossy(bytes);
+        for line in s.split_inclusive('\n') {
+            let trimmed = line.trim_end_matches(['\n', '\r']);
+            if !trimmed.is_empty() {
+                self.write_line(&format!("{dir} {trimmed}"));
+            }
+        }
+    }
+}
+
+struct LoggedStdin {
+    inner: tokio::io::Stdin,
+    log: Option<TrafficLog>,
+}
+
+struct LoggedStdout {
+    inner: tokio::io::Stdout,
+    log: Option<TrafficLog>,
+}
+
+impl tokio::io::AsyncRead for LoggedStdin {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let before = buf.filled().len();
+        let result = std::pin::Pin::new(&mut self.inner).poll_read(cx, buf);
+        if let std::task::Poll::Ready(Ok(())) = &result {
+            let new = &buf.filled()[before..];
+            if !new.is_empty() {
+                if let Some(log) = &self.log {
+                    log.log_bytes("→", new);
+                }
+            }
+        }
+        result
+    }
+}
+
+impl tokio::io::AsyncWrite for LoggedStdout {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let result = std::pin::Pin::new(&mut self.inner).poll_write(cx, buf);
+        if let std::task::Poll::Ready(Ok(n)) = &result {
+            if let Some(log) = &self.log {
+                log.log_bytes("←", &buf[..*n]);
+            }
+        }
+        result
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+fn logged_stdio() -> (LoggedStdin, LoggedStdout) {
+    let log = TrafficLog::from_env();
+    let (stdin, stdout) = rmcp::transport::stdio();
+    (
+        LoggedStdin {
+            inner: stdin,
+            log: log.clone(),
+        },
+        LoggedStdout {
+            inner: stdout,
+            log,
+        },
+    )
+}
 
 // ── Tool input schemas ────────────────────────────────────────────────────────
 
@@ -133,11 +327,13 @@ pub struct ResearcherServer {
 #[tool_router]
 impl ResearcherServer {
     pub fn new(cfg: Config) -> Self {
-        Self {
-            cfg: std::sync::Arc::new(cfg),
-            tool_router: Self::tool_router(),
+            let mut tool_router = Self::tool_router();
+            sanitize_router_schemas(&mut tool_router);
+            Self {
+                cfg: std::sync::Arc::new(cfg),
+                tool_router,
+            }
         }
-    }
 
     #[tool(description = "Web research agent.\nModes: quick=links+snippets, summary=bullet facts, report=full markdown (default), deep=thorough.\nProfiles: shopping-ro, tech-news, llm-news, academic, news, travel. Or pass domains:[\"site\"] directly.")]
     async fn research(
@@ -413,84 +609,88 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
 
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for ResearcherServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .build(),
-        )
-        .with_instructions(
-            "AI research agent — 6 tools:\n\
-             \n\
-             • research(query, mode?, intent?, domain_profile?, domains?, max_queries?, max_sources?)\n\
-               General web research. Modes: quick=snippets, summary=bullets, report=full markdown (default), deep=thorough.\n\
-               Profiles: shopping-ro, tech-news, llm-news, academic, news, travel. Or pass domains:[\"example.com\"] to pin sites.\n\
-             \n\
-             • research_person(name, method?)\n\
-               Meeting prep brief on any person. Covers career, public voice, interests, conversation hooks.\n\
-               method: professional | personal | both (default). Sources: LinkedIn, X, GitHub, Facebook, Instagram, Reddit.\n\
-             \n\
-             • research_company(name, country?)\n\
-               Meeting prep brief on a company. Covers what they do, size/stage, news, culture, strategy.\n\
-               Sources: LinkedIn, Crunchbase, Bloomberg, Glassdoor, Trustpilot, Wikipedia.\n\
-             \n\
-             • search_jobs(query, mode?)\n\
-               Find remote AI engineering jobs matching your profiles.toml [job-profile].\n\
-               mode: list=shortlist (default), deep=full company briefs on top 5. Sources: Remotive, Adzuna, SearXNG.\n\
-             \n\
-             • research_code(framework, version?, aspects?, repo?, query?)\n\
-               Research a library/framework: bugs, breaking changes, releases, community sentiment.\n\
-               aspects: bugs | changelog | community | releases (default: bugs+changelog+community).\n\
-               query: keyword to narrow, e.g. \"middleware timeout\". repo: GitHub slug e.g. \"tokio-rs/axum\".\n\
-             \n\
-             • market_insight(query, asset_class?, mode?)\n\
-               Stock, crypto, and macro market research. Web research only — no price APIs.\n\
-               query: ticker (BTC, NVDA, $AAPL) or topic (AI chip stocks, Ethereum staking).\n\
-               asset_class: stock | crypto | macro (default: macro).\n\
-               mode: quick | summary | report (default) | deep.\n\
-             \n\
-             ── When to use which params ──────────────────────────────────────\n\
-             \n\
-             mode:\n\
-               quick   → links/snippets only, no synthesis\n\
-               summary → bullet facts, fast answer\n\
-               report  → full analysis (default)\n\
-               deep    → exhaustive; 2× queries+sources; for important decisions\n\
-             \n\
-             intent (research only):\n\
-               developer-docs   → API/SDK/library docs; keyword-dense planner queries\n\
-               news             → recent events; pair with domain_profile=\"news\"\n\
-               product-research → product pages, reviews, comparisons\n\
-               academic         → papers, authors; pair with domain_profile=\"academic\"\n\
-               general          → default; broad web research\n\
-             \n\
-             domain_profile vs domains:\n\
-               Named profile → preset site list (news, academic, shopping-ro…)\n\
-               domains:[…]   → ad-hoc site pinning (vendor docs, a GitHub org)\n\
-               They union — use both together when needed\n\
-             \n\
-             ── Examples ──────────────────────────────────────────────────────\n\
-             \n\
-             research(\"LumApps REST API content retrieval\",\n\
-               intent=\"developer-docs\",\n\
-               domains=[\"lumapps.github.io\",\"developer.lumapps.com\"],\n\
-               mode=\"report\")\n\
-             \n\
-             research(\"OpenAI o3 release and benchmarks\",\n\
-               intent=\"news\", domain_profile=\"news\", mode=\"summary\")\n\
-             \n\
-             research(\"Axum 0.8 breaking changes\",\n\
-               intent=\"developer-docs\", mode=\"report\")\n\
-             \n\
-             research(\"attention mechanism transformers\",\n\
-               intent=\"academic\", domain_profile=\"academic\", mode=\"report\")\n\
-             \n\
-             Runs are traced to Langfuse when LANGFUSE_HOST + keys are set (see env).\n\
-             ".to_string(),
-        )
-    }
+            ServerInfo::new(
+                ServerCapabilities::builder()
+                    .enable_tools()
+                    .build(),
+            )
+            .with_server_info(rmcp::model::Implementation::new(
+                "researcher",
+                env!("CARGO_PKG_VERSION"),
+            ))
+            .with_instructions(
+                "AI research agent — 6 tools:\n\
+                 \n\
+                 • research(query, mode?, intent?, domain_profile?, domains?, max_queries?, max_sources?)\n\
+                   General web research. Modes: quick=snippets, summary=bullets, report=full markdown (default), deep=thorough.\n\
+                   Profiles: shopping-ro, tech-news, llm-news, academic, news, travel. Or pass domains:[\"example.com\"] to pin sites.\n\
+                 \n\
+                 • research_person(name, method?)\n\
+                   Meeting prep brief on any person. Covers career, public voice, interests, conversation hooks.\n\
+                   method: professional | personal | both (default). Sources: LinkedIn, X, GitHub, Facebook, Instagram, Reddit.\n\
+                 \n\
+                 • research_company(name, country?)\n\
+                   Meeting prep brief on a company. Covers what they do, size/stage, news, culture, strategy.\n\
+                   Sources: LinkedIn, Crunchbase, Bloomberg, Glassdoor, Trustpilot, Wikipedia.\n\
+                 \n\
+                 • search_jobs(query, mode?)\n\
+                   Find remote AI engineering jobs matching your profiles.toml [job-profile].\n\
+                   mode: list=shortlist (default), deep=full company briefs on top 5. Sources: Remotive, Adzuna, SearXNG.\n\
+                 \n\
+                 • research_code(framework, version?, aspects?, repo?, query?)\n\
+                   Research a library/framework: bugs, breaking changes, releases, community sentiment.\n\
+                   aspects: bugs | changelog | community | releases (default: bugs+changelog+community).\n\
+                   query: keyword to narrow, e.g. \"middleware timeout\". repo: GitHub slug e.g. \"tokio-rs/axum\".\n\
+                 \n\
+                 • market_insight(query, asset_class?, mode?)\n\
+                   Stock, crypto, and macro market research. Web research only — no price APIs.\n\
+                   query: ticker (BTC, NVDA, $AAPL) or topic (AI chip stocks, Ethereum staking).\n\
+                   asset_class: stock | crypto | macro (default: macro).\n\
+                   mode: quick | summary | report (default) | deep.\n\
+                 \n\
+                 ── When to use which params ──────────────────────────────────────\n\
+                 \n\
+                 mode:\n\
+                   quick   → links/snippets only, no synthesis\n\
+                   summary → bullet facts, fast answer\n\
+                   report  → full analysis (default)\n\
+                   deep    → exhaustive; 2× queries+sources; for important decisions\n\
+                 \n\
+                 intent (research only):\n\
+                   developer-docs   → API/SDK/library docs; keyword-dense planner queries\n\
+                   news             → recent events; pair with domain_profile=\"news\"\n\
+                   product-research → product pages, reviews, comparisons\n\
+                   academic         → papers, authors; pair with domain_profile=\"academic\"\n\
+                   general          → default; broad web research\n\
+                 \n\
+                 domain_profile vs domains:\n\
+                   Named profile → preset site list (news, academic, shopping-ro…)\n\
+                   domains:[…]   → ad-hoc site pinning (vendor docs, a GitHub org)\n\
+                   They union — use both together when needed\n\
+                 \n\
+                 ── Examples ──────────────────────────────────────────────────────\n\
+                 \n\
+                 research(\"LumApps REST API content retrieval\",\n\
+                   intent=\"developer-docs\",\n\
+                   domains=[\"lumapps.github.io\",\"developer.lumapps.com\"],\n\
+                   mode=\"report\")\n\
+                 \n\
+                 research(\"OpenAI o3 release and benchmarks\",\n\
+                   intent=\"news\", domain_profile=\"news\", mode=\"summary\")\n\
+                 \n\
+                 research(\"Axum 0.8 breaking changes\",\n\
+                   intent=\"developer-docs\", mode=\"report\")\n\
+                 \n\
+                 research(\"attention mechanism transformers\",\n\
+                   intent=\"academic\", domain_profile=\"academic\", mode=\"report\")\n\
+                 \n\
+                 Runs are traced to Langfuse when LANGFUSE_HOST + keys are set (see env).\n\
+                 ".to_string(),
+            )
+        }
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -518,11 +718,12 @@ async fn main() -> Result<()> {
         llm_fast_stages = ?cfg.llm_fast_stages,
         searxng_url = %cfg.searxng_url,
         model = %cfg.llm_model,
+        traffic_log = ?std::env::var("MCP_LOG_TRAFFIC").ok(),
         "researcher-mcp starting"
     );
 
     let service = ResearcherServer::new(cfg)
-        .serve(stdio())
+        .serve(logged_stdio())
         .await
         .inspect_err(|e| tracing::error!("MCP serve error: {e:?}"))?;
 
