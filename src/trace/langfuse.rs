@@ -257,6 +257,23 @@ mod tests {
         assert_eq!(ev["body"]["statusMessage"], json!("boom"));
     }
 
+
+    #[test]
+    fn score_create_includes_comment_when_present() {
+        let ev = score_create("t1", "relevance", 0.8, Some("solid report"), 0);
+        assert_eq!(ev["type"], json!("score-create"));
+        assert_eq!(ev["body"]["traceId"], json!("t1"));
+        assert_eq!(ev["body"]["name"], json!("relevance"));
+        assert_eq!(ev["body"]["value"], json!(0.8));
+        assert_eq!(ev["body"]["comment"], json!("solid report"));
+    }
+
+    #[test]
+    fn score_create_omits_comment_when_absent() {
+        let ev = score_create("t1", "relevance", 0.8, None, 0);
+        assert!(ev["body"].get("comment").is_none());
+    }
+
     #[tokio::test]
     #[ignore] // requires a live Langfuse at LANGFUSE_HOST with valid keys
     async fn live_ingestion_accepts_a_trace() {
