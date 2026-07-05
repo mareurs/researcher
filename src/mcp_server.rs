@@ -327,13 +327,13 @@ pub struct ResearcherServer {
 #[tool_router]
 impl ResearcherServer {
     pub fn new(cfg: Config) -> Self {
-            let mut tool_router = Self::tool_router();
-            sanitize_router_schemas(&mut tool_router);
-            Self {
-                cfg: std::sync::Arc::new(cfg),
-                tool_router,
-            }
+        let mut tool_router = Self::tool_router();
+        sanitize_router_schemas(&mut tool_router);
+        Self {
+            cfg: std::sync::Arc::new(cfg),
+            tool_router,
         }
+    }
 
     #[tool(description = "Web research agent.\nModes: quick=links+snippets, summary=bullet facts, report=full markdown (default), deep=thorough.\nProfiles: shopping-ro, tech-news, llm-news, academic, news, travel. Or pass domains:[\"site\"] directly.")]
     async fn research(
@@ -612,85 +612,85 @@ Sources: GitHub Issues, Reddit, Hacker News, official changelogs.")]
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for ResearcherServer {
     fn get_info(&self) -> ServerInfo {
-            ServerInfo::new(
-                ServerCapabilities::builder()
-                    .enable_tools()
-                    .build(),
-            )
-            .with_server_info(rmcp::model::Implementation::new(
-                "researcher",
-                env!("CARGO_PKG_VERSION"),
-            ))
-            .with_instructions(
-                "AI research agent — 6 tools:\n\
-                 \n\
-                 • research(query, mode?, intent?, domain_profile?, domains?, max_queries?, max_sources?)\n\
-                   General web research. Modes: quick=snippets, summary=bullets, report=full markdown (default), deep=thorough.\n\
-                   Profiles: shopping-ro, tech-news, llm-news, academic, news, travel. Or pass domains:[\"example.com\"] to pin sites.\n\
-                 \n\
-                 • research_person(name, method?)\n\
-                   Meeting prep brief on any person. Covers career, public voice, interests, conversation hooks.\n\
-                   method: professional | personal | both (default). Sources: LinkedIn, X, GitHub, Facebook, Instagram, Reddit.\n\
-                 \n\
-                 • research_company(name, country?)\n\
-                   Meeting prep brief on a company. Covers what they do, size/stage, news, culture, strategy.\n\
-                   Sources: LinkedIn, Crunchbase, Bloomberg, Glassdoor, Trustpilot, Wikipedia.\n\
-                 \n\
-                 • search_jobs(query, mode?)\n\
-                   Find remote AI engineering jobs matching your profiles.toml [job-profile].\n\
-                   mode: list=shortlist (default), deep=full company briefs on top 5. Sources: Remotive, Adzuna, SearXNG.\n\
-                 \n\
-                 • research_code(framework, version?, aspects?, repo?, query?)\n\
-                   Research a library/framework: bugs, breaking changes, releases, community sentiment.\n\
-                   aspects: bugs | changelog | community | releases (default: bugs+changelog+community).\n\
-                   query: keyword to narrow, e.g. \"middleware timeout\". repo: GitHub slug e.g. \"tokio-rs/axum\".\n\
-                 \n\
-                 • market_insight(query, asset_class?, mode?)\n\
-                   Stock, crypto, and macro market research. Web research only — no price APIs.\n\
-                   query: ticker (BTC, NVDA, $AAPL) or topic (AI chip stocks, Ethereum staking).\n\
-                   asset_class: stock | crypto | macro (default: macro).\n\
-                   mode: quick | summary | report (default) | deep.\n\
-                 \n\
-                 ── When to use which params ──────────────────────────────────────\n\
-                 \n\
-                 mode:\n\
-                   quick   → links/snippets only, no synthesis\n\
-                   summary → bullet facts, fast answer\n\
-                   report  → full analysis (default)\n\
-                   deep    → exhaustive; 2× queries+sources; for important decisions\n\
-                 \n\
-                 intent (research only):\n\
-                   developer-docs   → API/SDK/library docs; keyword-dense planner queries\n\
-                   news             → recent events; pair with domain_profile=\"news\"\n\
-                   product-research → product pages, reviews, comparisons\n\
-                   academic         → papers, authors; pair with domain_profile=\"academic\"\n\
-                   general          → default; broad web research\n\
-                 \n\
-                 domain_profile vs domains:\n\
-                   Named profile → preset site list (news, academic, shopping-ro…)\n\
-                   domains:[…]   → ad-hoc site pinning (vendor docs, a GitHub org)\n\
-                   They union — use both together when needed\n\
-                 \n\
-                 ── Examples ──────────────────────────────────────────────────────\n\
-                 \n\
-                 research(\"LumApps REST API content retrieval\",\n\
-                   intent=\"developer-docs\",\n\
-                   domains=[\"lumapps.github.io\",\"developer.lumapps.com\"],\n\
-                   mode=\"report\")\n\
-                 \n\
-                 research(\"OpenAI o3 release and benchmarks\",\n\
-                   intent=\"news\", domain_profile=\"news\", mode=\"summary\")\n\
-                 \n\
-                 research(\"Axum 0.8 breaking changes\",\n\
-                   intent=\"developer-docs\", mode=\"report\")\n\
-                 \n\
-                 research(\"attention mechanism transformers\",\n\
-                   intent=\"academic\", domain_profile=\"academic\", mode=\"report\")\n\
-                 \n\
-                 Runs are traced to Langfuse when LANGFUSE_HOST + keys are set (see env).\n\
-                 ".to_string(),
-            )
-        }
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .build(),
+        )
+        .with_server_info(rmcp::model::Implementation::new(
+            "researcher",
+            env!("CARGO_PKG_VERSION"),
+        ))
+        .with_instructions(
+            "AI research agent — 6 tools:\n\
+             \n\
+             • research(query, mode?, intent?, domain_profile?, domains?, max_queries?, max_sources?)\n\
+               General web research. Modes: quick=snippets, summary=bullets, report=full markdown (default), deep=thorough.\n\
+               Profiles: shopping-ro, tech-news, llm-news, academic, news, travel. Or pass domains:[\"example.com\"] to pin sites.\n\
+             \n\
+             • research_person(name, method?)\n\
+               Meeting prep brief on any person. Covers career, public voice, interests, conversation hooks.\n\
+               method: professional | personal | both (default). Sources: LinkedIn, X, GitHub, Facebook, Instagram, Reddit.\n\
+             \n\
+             • research_company(name, country?)\n\
+               Meeting prep brief on a company. Covers what they do, size/stage, news, culture, strategy.\n\
+               Sources: LinkedIn, Crunchbase, Bloomberg, Glassdoor, Trustpilot, Wikipedia.\n\
+             \n\
+             • search_jobs(query, mode?)\n\
+               Find remote AI engineering jobs matching your profiles.toml [job-profile].\n\
+               mode: list=shortlist (default), deep=full company briefs on top 5. Sources: Remotive, Adzuna, SearXNG.\n\
+             \n\
+             • research_code(framework, version?, aspects?, repo?, query?)\n\
+               Research a library/framework: bugs, breaking changes, releases, community sentiment.\n\
+               aspects: bugs | changelog | community | releases (default: bugs+changelog+community).\n\
+               query: keyword to narrow, e.g. \"middleware timeout\". repo: GitHub slug e.g. \"tokio-rs/axum\".\n\
+             \n\
+             • market_insight(query, asset_class?, mode?)\n\
+               Stock, crypto, and macro market research. Web research only — no price APIs.\n\
+               query: ticker (BTC, NVDA, $AAPL) or topic (AI chip stocks, Ethereum staking).\n\
+               asset_class: stock | crypto | macro (default: macro).\n\
+               mode: quick | summary | report (default) | deep.\n\
+             \n\
+             ── When to use which params ──────────────────────────────────────\n\
+             \n\
+             mode:\n\
+               quick   → links/snippets only, no synthesis\n\
+               summary → bullet facts, fast answer\n\
+               report  → full analysis (default)\n\
+               deep    → exhaustive; 2× queries+sources; for important decisions\n\
+             \n\
+             intent (research only):\n\
+               developer-docs   → API/SDK/library docs; keyword-dense planner queries\n\
+               news             → recent events; pair with domain_profile=\"news\"\n\
+               product-research → product pages, reviews, comparisons\n\
+               academic         → papers, authors; pair with domain_profile=\"academic\"\n\
+               general          → default; broad web research\n\
+             \n\
+             domain_profile vs domains:\n\
+               Named profile → preset site list (news, academic, shopping-ro…)\n\
+               domains:[…]   → ad-hoc site pinning (vendor docs, a GitHub org)\n\
+               They union — use both together when needed\n\
+             \n\
+             ── Examples ──────────────────────────────────────────────────────\n\
+             \n\
+             research(\"LumApps REST API content retrieval\",\n\
+               intent=\"developer-docs\",\n\
+               domains=[\"lumapps.github.io\",\"developer.lumapps.com\"],\n\
+               mode=\"report\")\n\
+             \n\
+             research(\"OpenAI o3 release and benchmarks\",\n\
+               intent=\"news\", domain_profile=\"news\", mode=\"summary\")\n\
+             \n\
+             research(\"Axum 0.8 breaking changes\",\n\
+               intent=\"developer-docs\", mode=\"report\")\n\
+             \n\
+             research(\"attention mechanism transformers\",\n\
+               intent=\"academic\", domain_profile=\"academic\", mode=\"report\")\n\
+             \n\
+             Runs are traced to Langfuse when LANGFUSE_HOST + keys are set (see env).\n\
+             ".to_string(),
+        )
+    }
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
