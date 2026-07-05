@@ -149,7 +149,122 @@ fn endpoint(base_url: &str, project: &str, location: &str, model: &str, stream: 
     )
 }
 
+/// Cached Vertex access token with its expiry instant.
+#[derive(Clone)]
+struct CachedToken {
+    token: String,
+    expiry: std::time::Instant,
+}
+
+/// Process-wide token cache. Tokens live ~1h; this avoids re-minting per LLM call.
+static TOKEN_CACHE: std::sync::Mutex<Option<CachedToken>> = std::sync::Mutex::new(None);
+
+/// Subset of an ADC "authorized_user" credentials file.
+#[derive(Deserialize)]
+struct AdcAuthorizedUser {
+    #[serde(default, rename = "type")]
+    cred_type: String,
+    #[serde(default)]
+    client_id: String,
+    #[serde(default)]
+    client_secret: String,
+    #[serde(default)]
+    refresh_token: String,
+}
+
+/// OAuth2 token endpoint response (subset).
+#[derive(Deserialize)]
+struct TokenResponse {
+    access_token: String,
+    #[serde(default)]
+    expires_in: u64,
+}
+
+/// Locate the ADC file: `GOOGLE_APPLICATION_CREDENTIALS`, else the well-known path.
+fn adc_path() -> Option<std::path::PathBuf> {
+    if let Ok(p) = std::env::var("GOOGLE_APPLICATION_CREDENTIALS") {
+        if !p.is_empty() {
+            return Some(std::path::PathBuf::from(p));
+        }
+    }
+    let home = std::env::var("HOME").ok()?;
+    let p = std::path::Path::new(&home).join(".config/gcloud/application_default_credentials.json");
+    p.exists().then_some(p)
+}
+
+/// Refresh an authorized_user credential directly against Google's OAuth2 endpoint.
+/// Returns `(access_token, expires_in_secs)`. Used instead of the `gcloud` CLI, which
+/// can hang and is absent from container images.
+async fn refresh_authorized_user(adc: &AdcAuthorizedUser) -> Result<(String, u64)> {
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()?;
+    let resp = client
+        .post("https://oauth2.googleapis.com/token")
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", adc.client_id.as_str()),
+            ("client_secret", adc.client_secret.as_str()),
+            ("refresh_token", adc.refresh_token.as_str()),
+        ])
+        .send()
+        .await
+        .context("ADC token refresh request")?;
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        bail!("ADC token endpoint returned {status}: {body}");
+    }
+    let tr: TokenResponse = serde_json::from_str(&body).context("parse ADC token response")?;
+    Ok((tr.access_token, tr.expires_in))
+}
+
+/// Mint a Google access token for Vertex.
+///
+/// Prefers an in-process ADC refresh (authorized_user) so we don't depend on the
+/// `gcloud` CLI, which can hang and is absent from container images. Falls back to
+/// shelling out to `gcloud` for credential types we don't mint directly (e.g. service
+/// accounts) on hosts where gcloud is healthy. Tokens are cached until shortly before
+/// expiry.
 pub async fn access_token() -> Result<String> {
+    // 1. Reuse a cached, unexpired token.
+    if let Some(cached) = TOKEN_CACHE.lock().ok().and_then(|g| g.clone()) {
+        if cached.expiry > std::time::Instant::now() {
+            return Ok(cached.token);
+        }
+    }
+
+    // 2. In-process ADC refresh (authorized_user) — no gcloud dependency.
+    if let Some(path) = adc_path() {
+        match tokio::fs::read(&path).await {
+            Ok(bytes) => match serde_json::from_slice::<AdcAuthorizedUser>(&bytes) {
+                Ok(adc)
+                    if adc.cred_type == "authorized_user"
+                        && !adc.client_id.is_empty()
+                        && !adc.refresh_token.is_empty() =>
+                {
+                    match refresh_authorized_user(&adc).await {
+                        Ok((token, expires_in)) => {
+                            let ttl = expires_in.saturating_sub(60).max(60);
+                            if let Ok(mut g) = TOKEN_CACHE.lock() {
+                                *g = Some(CachedToken {
+                                    token: token.clone(),
+                                    expiry: std::time::Instant::now()
+                                        + std::time::Duration::from_secs(ttl),
+                                });
+                            }
+                            return Ok(token);
+                        }
+                        Err(e) => tracing::warn!(error = %e, "ADC refresh failed; trying gcloud"),
+                    }
+                }
+                _ => {} // not an authorized_user file — fall through to gcloud
+            },
+            Err(e) => tracing::warn!(error = %e, "could not read ADC file; trying gcloud"),
+        }
+    }
+
+    // 3. Fallback: gcloud CLI (service accounts / hosts where gcloud is healthy).
     let candidates: [&[&str]; 2] = [
         &["auth", "application-default", "print-access-token"],
         &["auth", "print-access-token"],
@@ -271,11 +386,17 @@ mod tests {
         let messages = vec![
             ChatMessage::system("system prompt"),
             ChatMessage::user("hello"),
-            ChatMessage { role: "assistant".into(), content: "hi".into() },
+            ChatMessage {
+                role: "assistant".into(),
+                content: "hi".into(),
+            },
         ];
 
         let req = build_request(&messages, 123, 0.4);
-        assert_eq!(req.system_instruction.unwrap().parts[0].text, "system prompt");
+        assert_eq!(
+            req.system_instruction.unwrap().parts[0].text,
+            "system prompt"
+        );
         assert_eq!(req.contents.len(), 2);
         assert_eq!(req.contents[0].role, "user");
         assert_eq!(req.contents[0].parts[0].text, "hello");
@@ -289,7 +410,9 @@ mod tests {
         let resp = VertexResponse {
             candidates: vec![VertexCandidate {
                 content: Some(VertexResponseContent {
-                    parts: vec![VertexResponsePart { text: Some("Hello".into()) }],
+                    parts: vec![VertexResponsePart {
+                        text: Some("Hello".into()),
+                    }],
                 }),
             }],
         };
