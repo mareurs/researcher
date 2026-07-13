@@ -31,3 +31,18 @@ kedos-srl-review.md
 # Internal AI-assisted planning docs (superpowers scaffolding)
 docs/superpowers/
 .superpowers/
+
+# Tooling state — local session/runtime files, not project artifacts.
+# (Restores the rules from 516fd5d, clobbered by the 9b8d460 checkpoint.)
+# .codescout/memories/, project.toml and system-prompt.md stay tracked.
+.buddy/
+.fastembed_cache/
+.codescout/cc_session_id
+.codescout/debug.log*
+.codescout/diagnostic-*.log
+.codescout/constitution-seen/
+.codescout/embeddings/
+.codescout/guide_hints/
+.codescout/libraries.json
+.codescout/usage.db*
+.codescout/write.lock
