@@ -217,6 +217,7 @@ query → planner (LLM) → [search+scrape]×N → quality filter → embed-dedu
 | `LANGFUSE_MAX_PAYLOAD_CHARS` | `50000` | Truncate captured LLM/stage I/O |
 | `LLM_JUDGE_ENABLED` | `false` | Opt-in LLM-judge scoring of the final report (relevance/coverage/faithfulness/citation-validity) → Langfuse scores |
 | `PROGRESSIVE_DISCLOSURE_CHARS` | `4000` | Report size (chars) above which a compact envelope (summary/toc/path) replaces the inline report; `0` disables disclosure |
+| `MCP_IDLE_TIMEOUT_SECS` | `0` (disabled) | `researcher-mcp` only: self-exit after N seconds with no inbound client traffic and no in-flight tool call. Reaps servers stranded when an MCP client restarts/reconnects without closing the old stdio socket. `0` = never self-exit |
 
 ## Model Download
 

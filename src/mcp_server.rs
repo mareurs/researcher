@@ -33,6 +33,8 @@ use rmcp::{
     ServiceExt,
 };
 use std::sync::Arc as StdArc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use config::Config;
@@ -162,6 +164,7 @@ impl TrafficLog {
 struct LoggedStdin {
     inner: tokio::io::Stdin,
     log: Option<TrafficLog>,
+    idle: StdArc<IdleState>,
 }
 
 struct LoggedStdout {
@@ -180,6 +183,8 @@ impl tokio::io::AsyncRead for LoggedStdin {
         if let std::task::Poll::Ready(Ok(())) = &result {
             let new = &buf.filled()[before..];
             if !new.is_empty() {
+                // Any inbound client traffic counts as liveness for the idle watcher.
+                self.idle.touch();
                 if let Some(log) = &self.log {
                     log.log_bytes("→", new);
                 }
@@ -219,19 +224,112 @@ impl tokio::io::AsyncWrite for LoggedStdout {
     }
 }
 
-fn logged_stdio() -> (LoggedStdin, LoggedStdout) {
+fn logged_stdio(idle: StdArc<IdleState>) -> (LoggedStdin, LoggedStdout) {
     let log = TrafficLog::from_env();
     let (stdin, stdout) = rmcp::transport::stdio();
     (
         LoggedStdin {
             inner: stdin,
             log: log.clone(),
+            idle,
         },
         LoggedStdout {
             inner: stdout,
             log,
         },
     )
+}
+
+// ── Idle / lifecycle self-defense ─────────────────────────────────────────────
+//
+// A stdio MCP server exits only on stdin EOF. When an MCP client (e.g. Claude
+// Code) restarts or reconnects the server without closing the old socketpair,
+// the old process never sees EOF and lingers forever, accumulating stranded
+// `researcher-mcp` processes. Two guards mitigate this:
+//   * PR_SET_PDEATHSIG (in main) — exit if the parent process dies.
+//   * IdleState + idle watcher    — exit after MCP_IDLE_TIMEOUT_SECS with no
+//     client traffic and no in-flight tool call.
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Shared liveness state: unix-secs timestamp of the last byte received from the
+/// client, plus the number of in-flight tool calls. The idle watcher exits the
+/// process only when the client has been silent past the timeout *and* nothing
+/// is running — a long-running `deep` research call is never reaped mid-flight.
+pub struct IdleState {
+    last_activity: AtomicU64,
+    in_flight: AtomicUsize,
+}
+
+impl IdleState {
+    fn new() -> Self {
+        Self {
+            last_activity: AtomicU64::new(now_secs()),
+            in_flight: AtomicUsize::new(0),
+        }
+    }
+
+    /// Record client→server activity (inbound stdin bytes, or a tool call).
+    fn touch(&self) {
+        self.last_activity.store(now_secs(), Ordering::Relaxed);
+    }
+
+    fn idle_secs(&self) -> u64 {
+        now_secs().saturating_sub(self.last_activity.load(Ordering::Relaxed))
+    }
+
+    fn in_flight(&self) -> usize {
+        self.in_flight.load(Ordering::Relaxed)
+    }
+}
+
+/// RAII guard: marks a tool call in-flight for its lifetime (so the idle watcher
+/// never reaps the process mid-research) and refreshes activity on entry + exit.
+struct InFlightGuard(StdArc<IdleState>);
+
+impl InFlightGuard {
+    fn new(state: StdArc<IdleState>) -> Self {
+        state.in_flight.fetch_add(1, Ordering::Relaxed);
+        state.touch();
+        Self(state)
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.0.in_flight.fetch_sub(1, Ordering::Relaxed);
+        self.0.touch();
+    }
+}
+
+/// Spawn a background task that exits the process once the client has sent no
+/// traffic for `timeout_secs` and no tool call is running. `timeout_secs == 0`
+/// disables the watcher (default).
+fn spawn_idle_watcher(state: StdArc<IdleState>, timeout_secs: u64) {
+    if timeout_secs == 0 {
+        return;
+    }
+    // Poll frequently enough to react promptly, without busy-looping.
+    let tick = timeout_secs.clamp(5, 60);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(tick));
+        loop {
+            interval.tick().await;
+            if state.in_flight() == 0 && state.idle_secs() >= timeout_secs {
+                tracing::warn!(
+                    idle_secs = state.idle_secs(),
+                    timeout_secs,
+                    "researcher-mcp idle past timeout with no in-flight request — exiting to avoid stranding"
+                );
+                std::process::exit(0);
+            }
+        }
+    });
 }
 
 // ── Tool input schemas ────────────────────────────────────────────────────────
@@ -388,6 +486,7 @@ pub struct ResearchInput {
 pub struct ResearcherServer {
     cfg: std::sync::Arc<Config>,
     tool_router: ToolRouter<Self>,
+    idle: StdArc<IdleState>,
 }
 
 #[tool_router]
@@ -398,7 +497,14 @@ impl ResearcherServer {
         Self {
             cfg: std::sync::Arc::new(cfg),
             tool_router,
+            idle: StdArc::new(IdleState::new()),
         }
+    }
+
+    /// Shared idle/liveness state — cloned into the stdio transport and the
+    /// idle watcher so all three observe the same activity counters.
+    pub fn idle_state(&self) -> StdArc<IdleState> {
+        self.idle.clone()
     }
 
     #[tool(description = "Research any topic, person, company, market, codebase, or jobs.")]
@@ -406,6 +512,9 @@ impl ResearcherServer {
         &self,
         Parameters(input): Parameters<ResearchInput>,
     ) -> String {
+        // Hold the process alive for the duration of the call and refresh the
+        // idle timer, so the idle watcher never reaps us mid-research.
+        let _guard = InFlightGuard::new(self.idle.clone());
         tracing::info!(
             target = ?input.target,
             mode = ?input.mode,
@@ -783,6 +892,20 @@ async fn main() -> Result<()> {
         .with(fmt::layer().with_writer(std::io::stderr).with_ansi(false))
         .init();
 
+    // Lifecycle self-defense: exit if our parent dies while we keep running.
+    // Covers the "parent killed, child reparented to init" stranding variant.
+    #[cfg(target_os = "linux")]
+    // SAFETY: prctl(PR_SET_PDEATHSIG) and getppid() are argument-only syscalls
+    // with no memory-safety preconditions; we pass a valid signal number and
+    // read the returned ppid. No pointers are dereferenced.
+    unsafe {
+        libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as libc::c_ulong, 0, 0, 0);
+        // Race: the parent may have already exited before the prctl above ran.
+        if libc::getppid() == 1 {
+            std::process::exit(0);
+        }
+    }
+
     // Config from env vars (no --server or --query flags needed in MCP mode)
     let cfg = Config {
         server: false,
@@ -790,6 +913,13 @@ async fn main() -> Result<()> {
         output: None,
         ..config_from_env()
     };
+
+    // Idle self-exit: 0 (default) disables it. Set MCP_IDLE_TIMEOUT_SECS to have
+    // an abandoned server (client leaked the socket) self-terminate when silent.
+    let idle_timeout_secs: u64 = std::env::var("MCP_IDLE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
 
     tracing::info!(
         llm_base_url = %cfg.llm_base_url,
@@ -799,11 +929,16 @@ async fn main() -> Result<()> {
         searxng_url = %cfg.searxng_url,
         model = %cfg.llm_model,
         traffic_log = ?std::env::var("MCP_LOG_TRAFFIC").ok(),
+        idle_timeout_secs,
         "researcher-mcp starting"
     );
 
-    let service = ResearcherServer::new(cfg)
-        .serve(logged_stdio())
+    let server = ResearcherServer::new(cfg);
+    let idle = server.idle_state();
+    spawn_idle_watcher(idle.clone(), idle_timeout_secs);
+
+    let service = server
+        .serve(logged_stdio(idle))
         .await
         .inspect_err(|e| tracing::error!("MCP serve error: {e:?}"))?;
 

@@ -1600,6 +1600,7 @@ dependencies = [
  "clap",
  "eventsource-stream",
  "futures",
+ "libc",
  "regex",
  "reqwest",
  "rmcp",
