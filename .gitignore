@@ -26,7 +26,10 @@ runs/
 
 # Personal files not for publication
 kedos-srl-review.md
-.mcp.json
+# .mcp.json and every backup/variant of it — they carry live API keys.
+# The .example template is the only one that may be tracked.
+.mcp.json*
+!.mcp.json.example
 
 # Internal AI-assisted planning docs (superpowers scaffolding)
 docs/superpowers/

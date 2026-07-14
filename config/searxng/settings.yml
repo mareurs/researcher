@@ -58,6 +58,7 @@ engines:
   - name: braveapi
     engine: braveapi
     shortcut: brapi
+    # Secret — do NOT commit a real key here; this file is tracked.
     api_key: REPLACE_WITH_BRAVE_API_KEY
     disabled: false
   - name: wikipedia
