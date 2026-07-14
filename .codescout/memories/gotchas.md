@@ -50,7 +50,7 @@
 
 ## `.mcp.json` Backups Carry Live Keys
 - **Problem:** `.gitignore` had `.mcp.json` but not `.mcp.json.bak-*`, so normalizer backups (`.mcp.json.bak-norm2`, `.mcp.json.bak-mcpnorm-*`) holding real `LLM_API_KEY` / `BRAVE_API_KEY` / `TAVILY_API_KEY` / `EXA_API_KEY` were tracked. Now ignored via `.mcp.json*` + `!.mcp.json.example`.
-  **Fix:** `config/searxng/settings.yml` is tracked and has a real `api_key:` field for the `braveapi` engine — it now holds a `REPLACE_WITH_BRAVE_API_KEY` placeholder. Do NOT paste a live Brave key back into it; it will be committed.
+  **Fix:** `config/searxng/settings.yml` carried a live Brave `api_key` in a tracked file too. It is now gitignored; only `config/searxng/settings.yml.example` (placeholder) is tracked, and `make searxng-config` (a prerequisite of `make infra-up`) bootstraps the real file from it. Docker bind-mounts `settings.yml`, so if it were missing Docker would silently create a *directory* there — hence the bootstrap target. Put live keys in `settings.yml` only, never in the template.
 
 ## Tooling State Keeps Creeping Back Into Git
 - **Problem:** `.buddy/` and `.codescout/` runtime files (session narratives, debug logs, `embeddings/project.db`, `.fastembed_cache/` ONNX blobs) get re-tracked whenever a broad `git add` runs with the ignore rules missing. Commit 9b8d460 ("checkpoint") clobbered the ignore block added in 516fd5d, re-tracking 249 files.

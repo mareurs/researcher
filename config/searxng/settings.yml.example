@@ -1,5 +1,11 @@
 # Minimal SearXNG config for Researcher
 # Enables JSON output format and disables the web UI rate limiter.
+#
+# TEMPLATE — copy to settings.yml before starting the infra stack:
+#   make searxng-config      (or: cp settings.yml.example settings.yml)
+#
+# settings.yml is gitignored because it carries a live Brave api_key.
+# Put real secrets ONLY in settings.yml — never in this template.
 
 use_default_settings:
   engines:
@@ -58,7 +64,7 @@ engines:
   - name: braveapi
     engine: braveapi
     shortcut: brapi
-    # Secret — do NOT commit a real key here; this file is tracked.
+    # Set your real key in settings.yml (gitignored), NOT in this template.
     api_key: REPLACE_WITH_BRAVE_API_KEY
     disabled: false
   - name: wikipedia

@@ -31,6 +31,10 @@ kedos-srl-review.md
 .mcp.json*
 !.mcp.json.example
 
+# SearXNG runtime config — holds a live Brave api_key, so it must never be
+# committed. Bootstrap it from the tracked template: `make searxng-config`.
+config/searxng/settings.yml
+
 # Internal AI-assisted planning docs (superpowers scaffolding)
 docs/superpowers/
 .superpowers/

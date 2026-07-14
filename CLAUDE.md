@@ -40,6 +40,7 @@ cargo run --bin researcher -- --server --bind-addr 0.0.0.0:3000
 
 ```bash
 cp .env.example .env   # edit LLM/search settings
+make searxng-config    # bootstrap config/searxng/settings.yml from the template
 
 # Local GPU (llama-cpp + tei-embed + searxng + researcher)
 docker compose --profile local-llm up
@@ -49,6 +50,12 @@ OPENAI_API_KEY=sk-... docker compose up
 ```
 
 Services: `searxng` (:4000), `llama-cpp` (:8080, profile `local-llm`), `tei-embed` (:8081), `researcher` (:3000).
+
+**Secrets never go in tracked files.** `config/searxng/settings.yml` holds a live
+Brave `api_key` and is gitignored; only `settings.yml.example` is tracked. `make
+infra-up` bootstraps the real file from the template automatically — Docker
+bind-mounts it, and would silently create a *directory* in its place if it were
+missing. Put your Brave key in `settings.yml`, never in the template.
 
 ## Project Structure
 
