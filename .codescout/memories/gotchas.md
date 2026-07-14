@@ -43,3 +43,15 @@
 ## RERANK_MIN_SCORE Not in CLAUDE.md
 - **Problem:** `RERANK_MIN_SCORE` env var (default -5.0 logits) is implemented but missing from CLAUDE.md's env var reference table. Can't be discovered from docs alone.
   **Fix:** Set in `.env` if you want stricter reranking. Check `src/embeddings/reranker.rs` for current default.
+
+## Secret Scans: codescout `grep` Silently Skips Dotfiles
+- **Problem:** codescout's `grep` tool does not match files whose names begin with `.` (e.g. `.mcp.json.bak-*`). A pre-commit credential sweep run with it returns "0 matches" while live API keys sit in tracked dotfiles. This bit us on 2026-07-13: the scan came back clean, a push went out, and four live keys (Gemini, Brave, Tavily, Exa) landed in the then-public repo.
+  **Fix:** Never clear a commit for secrets using codescout `grep`. Use `git grep -I -n -E '<patterns>' $(git rev-list <range>)` — it searches real tracked blobs across history, dotfiles included. Scan the *pushed range*, not just the working tree.
+
+## `.mcp.json` Backups Carry Live Keys
+- **Problem:** `.gitignore` had `.mcp.json` but not `.mcp.json.bak-*`, so normalizer backups (`.mcp.json.bak-norm2`, `.mcp.json.bak-mcpnorm-*`) holding real `LLM_API_KEY` / `BRAVE_API_KEY` / `TAVILY_API_KEY` / `EXA_API_KEY` were tracked. Now ignored via `.mcp.json*` + `!.mcp.json.example`.
+  **Fix:** `config/searxng/settings.yml` is tracked and has a real `api_key:` field for the `braveapi` engine — it now holds a `REPLACE_WITH_BRAVE_API_KEY` placeholder. Do NOT paste a live Brave key back into it; it will be committed.
+
+## Tooling State Keeps Creeping Back Into Git
+- **Problem:** `.buddy/` and `.codescout/` runtime files (session narratives, debug logs, `embeddings/project.db`, `.fastembed_cache/` ONNX blobs) get re-tracked whenever a broad `git add` runs with the ignore rules missing. Commit 9b8d460 ("checkpoint") clobbered the ignore block added in 516fd5d, re-tracking 249 files.
+  **Fix:** Ignore rules restored in `.gitignore` under "Tooling state". `.codescout/memories/`, `project.toml` and `system-prompt.md` are deliberate project artifacts and STAY tracked — never blanket-ignore all of `.codescout/`.
