@@ -26,10 +26,19 @@ The `researcher-mcp` binary is loaded once when the MCP server starts. After mod
 ## Running Locally (no Docker)
 
 ```bash
-# Assumes llama.cpp on :8080 and SearXNG on :4000
-LLM_BASE_URL=http://localhost:8080/v1 \
+# Vertex/Gemini backend (live config) — run `gcloud auth application-default login` first
+LLM_PROVIDER=vertex \
+VERTEX_PROJECT=sp-mrv-gemini-dev \
+VERTEX_LOCATION=eu \
+LLM_MODEL=gemini-3.1-flash-lite \
 SEARXNG_URL=http://localhost:4000 \
 RUST_LOG=info \
+cargo run --bin researcher -- --query "your topic" --output report.md
+
+# OpenAI-compatible backend (e.g. local llama.cpp on :30080)
+LLM_PROVIDER=openai \
+LLM_BASE_URL=http://localhost:30080/v1 \
+SEARXNG_URL=http://localhost:4000 \
 cargo run --bin researcher -- --query "your topic" --output report.md
 
 # Server mode
@@ -38,24 +47,24 @@ cargo run --bin researcher -- --server --bind-addr 0.0.0.0:3000
 
 ## Docker Stack
 
+Two independent stacks, coordinated over the external `ai-infra-net` Docker
+network. Bring infra up first, then the app.
+
 ```bash
-cp .env.example .env   # edit LLM/search settings
-make searxng-config    # bootstrap config/searxng/settings.yml from the template
+cp .env.example .env   # edit LLM/search settings (live config uses Vertex)
 
-# Local GPU (llama-cpp + tei-embed + searxng + researcher)
-docker compose --profile local-llm up
+# 1. Shared AI infra (searxng, tei-embed, tei-rerank, optional llama-cpp GPU)
+make infra-up          # bootstraps config/searxng/settings.yml, then compose up -d
 
-# OpenAI (searxng + researcher only)
-OPENAI_API_KEY=sk-... docker compose up
+# 2. Researcher app
+make up                # docker compose up -d
+
+make stop-all          # tear both down (keeps volumes)
 ```
 
-Services: `searxng` (:4000), `llama-cpp` (:8080, profile `local-llm`), `tei-embed` (:8081), `researcher` (:3000).
+Infra services (`infra/docker-compose.yml`): `searxng` (:4000), `tei-embed` (:30082), `tei-rerank` (:30083), `llama-cpp` (:30080, GPU), `llama-cpp-fast` (:30081, GPU). App service (root `docker-compose.yml`): `researcher` (:3000).
 
-**Secrets never go in tracked files.** `config/searxng/settings.yml` holds a live
-Brave `api_key` and is gitignored; only `settings.yml.example` is tracked. `make
-infra-up` bootstraps the real file from the template automatically — Docker
-bind-mounts it, and would silently create a *directory* in its place if it were
-missing. Put your Brave key in `settings.yml`, never in the template.
+With the live Vertex backend the `llama-cpp*` GPU services are unused — only `searxng` + `tei-embed` + `tei-rerank` are needed.
 
 ## Project Structure
 
@@ -99,16 +108,15 @@ query → planner (LLM) → [search+scrape]×N → quality filter → embed-dedu
 
 ## Key Design Decisions
 
-**LLM backend**: Any OpenAI-compatible `/v1/chat/completions`. Switch with `LLM_BASE_URL`.
-- Local: `llama.cpp server` (CUDA image `ghcr.io/ggml-org/llama.cpp:server-cuda`)
-- Model: `Qwen_Qwen3.5-9B-Q4_K_M.gguf` (matches gpt-researcher's Qwen3.5-9B)
-- Cloud: `https://api.openai.com/v1` + `OPENAI_API_KEY`
+**LLM backend**: Provider-agnostic, selected by `LLM_PROVIDER` (`openai` | `vertex`).
+- **Vertex (live-config default)**: Google Vertex AI Gemini. Set `LLM_PROVIDER=vertex`, `VERTEX_PROJECT`, `VERTEX_LOCATION` (live: project `sp-mrv-gemini-dev`, location `eu`, model `gemini-3.1-flash-lite`). Base URL defaults to `https://aiplatform.googleapis.com/v1beta1`. Auth uses Application Default Credentials — run `gcloud auth application-default login` (no API key in env). See `src/llm/vertex.rs`.
+- **OpenAI-compatible**: any `/v1/chat/completions` endpoint. `LLM_PROVIDER=openai` (default) + `LLM_BASE_URL`. Local option: `llama.cpp server` (CUDA image `ghcr.io/ggml-org/llama.cpp:server-cuda`, e.g. Qwen3.5); cloud: `https://api.openai.com/v1` + `OPENAI_API_KEY` (via `LLM_API_KEY`).
 
-**Thinking tokens**: `STRIP_THINKING_TOKENS=true` strips `<think>...</think>` from all Qwen3 responses in `LlmClient::complete()` and `stream_completion()`.
+**Thinking tokens**: `STRIP_THINKING_TOKENS=true` strips `<think>...</think>` from Qwen3 responses in `LlmClient::complete()` and `stream_completion()` (no-op for Gemini/OpenAI models that don't emit them).
 
 **Deduplication**: TEI (`BAAI/bge-large-en-v1.5`) embeds sources → cosine similarity → drop duplicates above `DEDUP_THRESHOLD` → rerank by similarity to original query.
 
-**Search fallback**: SearXNG → DuckDuckGo Lite (automatic, no config needed).
+**Search fallback**: profile primary (Brave when `BRAVE_API_KEY` set / Tavily for `news` / Exa for `academic`) → SearXNG → DuckDuckGo Lite. First non-empty result wins; see `search_with_fallback` in `src/search/mod.rs`.
 
 **MCP server**: stdio transport, `#[tool_router]` / `#[tool]` macros from `rmcp = "1.1"`. No streaming — returns complete report. All logging to stderr.
 
@@ -179,12 +187,16 @@ query → planner (LLM) → [search+scrape]×N → quality filter → embed-dedu
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `LLM_BASE_URL` | `http://localhost:8080/v1` | Any OpenAI-compat endpoint |
-| `LLM_MODEL` | `Qwen_Qwen3.5-9B-Q4_K_M` | Model name sent in requests |
-| `LLM_API_KEY` | `no-key-needed` | Set to `sk-...` for OpenAI |
+| `LLM_PROVIDER` | `openai` | Primary LLM backend: `openai` \| `vertex` (live config uses `vertex`) |
+| `LLM_BASE_URL` | `http://localhost:8080/v1` | OpenAI-compat endpoint; for `vertex` defaults to `https://aiplatform.googleapis.com/v1beta1` |
+| `LLM_MODEL` | `Qwen_Qwen3.5-9B-Q4_K_M` | Model name sent in requests (live vertex: `gemini-3.1-flash-lite`) |
+| `LLM_API_KEY` | `no-key-needed` | Set to `sk-...` for OpenAI; unused for `vertex` (uses ADC) |
+| `VERTEX_PROJECT` | `` | GCP project id — required when `LLM_PROVIDER=vertex` (live: `sp-mrv-gemini-dev`) |
+| `VERTEX_LOCATION` | `us-central1` | Vertex AI region (live: `eu`) |
 | `LLM_MAX_TOKENS` | `4096` | Max tokens per LLM call |
 | `LLM_TEMPERATURE` | `0.3` | Generation temperature |
 | `STRIP_THINKING_TOKENS` | `true` | Strip `<think>` from Qwen3 |
+| `LLM_FAST_PROVIDER` | `` | Provider for fast LLM; empty = inherit `LLM_PROVIDER` |
 | `LLM_FAST_BASE_URL` | `` (disabled) | Fast LLM endpoint; empty = use heavy backend |
 | `LLM_FAST_MODEL` | `Qwen3.5-4B-Q4_K_M` | Model name for fast LLM |
 | `LLM_FAST_API_KEY` | `` | Fast LLM API key; empty = use `LLM_API_KEY` |
@@ -249,11 +261,18 @@ docker run --rm \
     "researcher": {
       "command": "/path/to/researcher-mcp",
       "env": {
-        "LLM_BASE_URL": "http://localhost:8080/v1",
+        "LLM_PROVIDER": "vertex",
+        "LLM_MODEL": "gemini-3.1-flash-lite",
+        "VERTEX_PROJECT": "sp-mrv-gemini-dev",
+        "VERTEX_LOCATION": "eu",
         "SEARXNG_URL": "http://localhost:4000",
-        "STRIP_THINKING_TOKENS": "true"
+        "BRAVE_API_KEY": "<brave-search-api-key>",
+        "EMBED_BASE_URL": "http://localhost:30082",
+        "RERANK_BASE_URL": "http://localhost:30083"
       }
     }
   }
 }
 ```
+
+Vertex uses Application Default Credentials — run `gcloud auth application-default login` on the host so the MCP process can mint access tokens (no API key needed in env).
