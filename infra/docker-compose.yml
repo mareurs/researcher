@@ -154,6 +154,17 @@ services:
 
   # ── TEI rerank: CPU inference ──────────────────────────────────────────────
   # Cross-encoder is ~90MB — trivial on CPU.
+  #
+  # SUPERSEDED 2026-07-27: researcher's RERANK_BASE_URL now points at
+  # http://localhost:48083 — bge-reranker-v2-m3-Q4_K_M on llama-server, from the
+  # codescout-retrieval stack (340 MiB VRAM, stronger and multilingual). This
+  # service is deliberately left running as the documented fallback: reverting is
+  # a one-line change back to :30083 in researcher/.mcp.json plus a restart.
+  #
+  # The two backends disagree on SCORE SCALE — TEI returns sigmoid 0..1,
+  # llama-server returns raw logits (~±11). RERANK_MIN_SCORE and the
+  # combined_score weights mean different things against each. See
+  # codescout/docs/issues/2026-07-27-researcher-rerank-score-scale-mismatch.md
   tei-rerank:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8
     container_name: tei-rerank
