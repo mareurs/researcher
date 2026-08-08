@@ -120,6 +120,38 @@ query → planner (LLM) → [search+scrape]×N → quality filter → embed-dedu
 
 **MCP server**: stdio transport, `#[tool_router]` / `#[tool]` macros from `rmcp = "1.1"`. No streaming — returns complete report. All logging to stderr.
 
+## Bug Tracking
+
+Per-file bug tracking lives in `docs/issues/`. Every bug noticed during work gets its
+own file, copied from `docs/issues/_TEMPLATE.md` — that template carries the status
+vocabulary, the trigger rules, and the archive flow, so it is the one place to read
+before filing.
+
+Two behaviors are load-bearing and easy to skip:
+
+- **Capture on notice** — add the file the moment a bug is noticed (wrong output,
+  silent failures, misleading errors, tool quirks), not at task end.
+- **Archive through the librarian** — `artifact(action="move", id=..., new_rel_path=...)`,
+  never a bare `git mv`. `id = sha256(abs_path)`, so a hand-move leaves the catalog row
+  pointing at a path that no longer exists.
+
+List what's open:
+
+```
+artifact(action="find", kind="bug",
+         filter={"status": {"in": ["open", "investigating"]}})
+```
+
+`researcher` belongs to the `codescout-ecosystem` librarian umbrella, so `scope="umbrella"`
+surfaces these files from a codescout session and codescout's from here. Membership lives
+in a per-machine registry outside every repo and is deliberately not named in this file —
+run a `scope="umbrella"` query and read the returned `scope` block to see what actually
+resolves on the host you are standing on.
+
+Before 2026-08-08 researcher had no issues directory, and its bugs were filed in
+codescout's tracker for want of anywhere better. One file was relocated when this
+directory was created. If you find a researcher bug still filed over there, move it here.
+
 ## MCP Server Instructions Rule
 
 **Every time a new tool is added to `researcher-mcp`, update `get_info()` in `src/mcp_server.rs`** to add a one-line bullet for the new tool in the `with_instructions(...)` block. The instructions must always enumerate all available tools with their signatures and key parameters so the LLM host can pick the right tool without guessing.
