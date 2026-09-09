@@ -131,15 +131,15 @@ Two behaviors are load-bearing and easy to skip:
 
 - **Capture on notice** — add the file the moment a bug is noticed (wrong output,
   silent failures, misleading errors, tool quirks), not at task end.
-- **Archive through the librarian** — `artifact(action="move", id=..., new_rel_path=...)`,
+- **Archive through the librarian** — `doc(action="move", id=..., new_rel_path=...)`,
   never a bare `git mv`. `id = sha256(abs_path)`, so a hand-move leaves the catalog row
   pointing at a path that no longer exists.
 
 List what's open:
 
 ```
-artifact(action="find", kind="bug",
-         filter={"status": {"in": ["open", "investigating"]}})
+doc(action="find", kind="bug",
+    filter={"status": {"in": ["open", "investigating"]}})
 ```
 
 `researcher` belongs to the `codescout-ecosystem` librarian umbrella, so `scope="umbrella"`
@@ -210,8 +210,8 @@ directory was created. If you find a researcher bug still filed over there, move
 
 ## Codescout Rules (enforced by hooks)
 
-- **Never `Read` source files** — use `list_symbols` + `find_symbol(include_body=true)`
-- **Never `edit_file` for structural changes** — use `replace_symbol`, `insert_code`, `remove_symbol`
+- **Never `Read` source files** — use `symbols(path=...)` for an overview, `symbols(name=..., include_body=true)` for bodies
+- **Never `edit_file` for structural changes** — use `edit_code` (`action=replace|insert|remove|rename`)
 - **Structural edits** = anything changing function bodies, adding methods, struct fields
 - **`edit_file` is OK for** imports, string literals, comments, single-line changes
 

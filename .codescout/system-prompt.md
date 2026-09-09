@@ -19,8 +19,8 @@ Avoid: "data", "result", "error" (too broad)
 
 ## Navigation Strategy
 1. `memory(action="read", topic="architecture")` — orient with module map and data flow
-2. `find_symbol("run", path="src/researcher/pipeline.rs", include_body=true)` — read the orchestrator
-3. `list_symbols("src/researcher/")` — survey the pipeline modules
+2. `symbols(name="run", path="src/researcher/pipeline.rs", include_body=true)` — read the orchestrator
+3. `symbols(path="src/researcher/")` — survey the pipeline modules
 4. `semantic_search("your concept")` — find connecting code
 5. For job search: start at `src/jobs/` — completely separate from the research pipeline
 

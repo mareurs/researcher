@@ -18,8 +18,8 @@ To open a bug:
   3. Done — the librarian discovers the file on the next reindex via its
      `kind: bug` frontmatter. There is no rule needed in the registry and no
      manual index file. List active bugs with:
-       artifact(action="find", kind="bug",
-                filter={"status": {"in": ["open", "investigating"]}})
+       doc(action="find", kind="bug",
+           filter={"status": {"in": ["open", "investigating"]}})
      Both non-terminal states — status="open" alone hides any bug marked
      `investigating`, which is what you set while actively working one.
 
@@ -67,7 +67,7 @@ Archive trigger: move the file into docs/issues/archive/ once the fix is on
 promotion branch, so there is exactly one SHA per fix and nothing to re-cite
 later. (If researcher ever grows a long-lived working branch, this paragraph
 is the one that goes stale first.)
-Archive via artifact(action="move", id=..., new_rel_path="docs/issues/archive/...")
+Archive via doc(action="move", id=..., new_rel_path="docs/issues/archive/...")
 — never a bare git mv, which orphans the catalog row: id = sha256(abs_path),
 so a hand-move leaves the row pointing at a path that no longer exists.
 
