@@ -6,6 +6,8 @@ use tracing::debug;
 /// Enriched extraction result with content quality metadata.
 pub struct ExtractedPage {
     pub text: String,
+    pub final_url: String,
+    pub truncated: bool,
     pub raw_html_len: usize,
     pub link_count: usize,
     pub ad_link_count: usize,
@@ -14,7 +16,6 @@ pub struct ExtractedPage {
     pub has_code_blocks: bool,
     pub paywall_detected: bool,
 }
-
 
 /// Fetch a URL and extract clean readable text from the HTML body.
 /// Strips scripts, styles, nav, footer, ads — keeps main content.
@@ -52,8 +53,10 @@ pub async fn fetch_and_extract(
         anyhow::bail!("non-HTML content type: {}", content_type);
     }
 
+    let final_url = resp.url().to_string();
     let html = resp.text().await?;
-    let page = extract_text(&html, max_chars);
+    let mut page = extract_text(&html, max_chars);
+    page.final_url = final_url;
 
     if page.text.len() < 100 {
         anyhow::bail!("extracted text too short ({})", page.text.len());
@@ -64,66 +67,84 @@ pub async fn fetch_and_extract(
 
 fn extract_text(html: &str, max_chars: usize) -> ExtractedPage {
     let document = Html::parse_document(html);
-
-    // Remove noise elements by collecting their text nodes to exclude
-    let noise_selector = Selector::parse(
-        "script, style, nav, header, footer, aside",
-    )
-    .unwrap();
-    let noise_text: std::collections::HashSet<String> = document
-        .select(&noise_selector)
-        .flat_map(|el| el.text())
-        .map(|t| t.to_string())
-        .collect();
-
-    // Prefer semantic content containers (includes table, pre, blockquote)
-    let content_selector = Selector::parse(
-        "article p, main p, [role='main'] p, \
-         .content p, .post-content p, .entry-content p, \
-         #content p, #main p, \
-         article li, main li, \
-         article h1, article h2, article h3, \
-         main h1, main h2, main h3, \
-         p, h1, h2, h3, li, table, pre, blockquote",
-    )
-    .unwrap();
-
-    let mut parts: Vec<String> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    // Use the first available semantic root, rather than a selector union whose
+    // generic li/p alternatives also scan the entire navigation before main.
+    let roots = [
+        "main, [role='main']",
+        "article",
+        ".docblock",
+        ".post-content, .entry-content, #content, #main, .content",
+    ]
+    .iter()
+    .find_map(|selector| {
+        let selector = Selector::parse(selector).expect("static selector");
+        let selected: Vec<_> = document.select(&selector).collect();
+        (!selected.is_empty()).then_some(selected)
+    });
+    let content_selector =
+        Selector::parse("p, h1, h2, h3, h4, h5, h6, li, table, pre, blockquote, dt, dd")
+            .expect("static selector");
+    let mut parts = Vec::new();
     let mut total = 0usize;
+    let mut truncated = false;
     let mut has_headings = false;
     let mut has_lists = false;
     let mut has_code_blocks = false;
 
     for el in document.select(&content_selector) {
-        let tag = el.value().name();
-        match tag {
-            "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => has_headings = true,
-            "li" => has_lists = true,
-            "pre" | "code" => has_code_blocks = true,
-            "table" | "blockquote" => has_code_blocks = true,
-            _ => {}
-        }
-
-        let text = el.text().collect::<Vec<_>>().join(" ");
-        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-
-        if text.len() < 20 || seen.contains(&text) || noise_text.contains(&text) {
+        let ancestors: Vec<_> = el
+            .ancestors()
+            .filter_map(scraper::ElementRef::wrap)
+            .collect();
+        if ancestors.iter().any(|a| {
+            matches!(
+                a.value().name(),
+                "script" | "style" | "nav" | "header" | "footer" | "aside" | "form"
+            )
+        }) {
             continue;
         }
-        seen.insert(text.clone());
-
-        let remaining = max_chars.saturating_sub(total);
+        if roots.as_ref().is_some_and(|roots| {
+            !roots
+                .iter()
+                .any(|root| ancestors.iter().any(|a| a.id() == root.id()))
+        }) {
+            continue;
+        }
+        // A selected outer block already includes its nested text. Counting both
+        // can consume the budget before later safety qualifiers are reached.
+        if ancestors.iter().any(|a| {
+            matches!(
+                a.value().name(),
+                "p" | "li" | "table" | "pre" | "blockquote"
+            )
+        }) {
+            continue;
+        }
+        let text = el.text().collect::<Vec<_>>().join(" ");
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if text.is_empty() {
+            continue;
+        }
+        let separator = usize::from(!parts.is_empty());
+        let remaining = max_chars.saturating_sub(total + separator);
         if remaining == 0 {
+            truncated = true;
             break;
         }
-
-        let cut = (0..=remaining.min(text.len())).rev()
-            .find(|&i| text.is_char_boundary(i))
-            .unwrap_or(0);
-        let chunk = &text[..cut];
-        parts.push(chunk.to_string());
-        total += chunk.len();
+        match el.value().name() {
+            "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => has_headings = true,
+            "li" => has_lists = true,
+            "pre" | "table" | "blockquote" => has_code_blocks = true,
+            _ => {}
+        }
+        let chunk: String = text.chars().take(remaining).collect();
+        total += separator + chunk.chars().count();
+        truncated = chunk.len() < text.len();
+        parts.push(chunk);
+        if truncated {
+            break;
+        }
     }
 
     // Count links and detect ad links
@@ -167,6 +188,8 @@ fn extract_text(html: &str, max_chars: usize) -> ExtractedPage {
 
     ExtractedPage {
         text: parts.join("\n"),
+        final_url: String::new(),
+        truncated,
         raw_html_len: html.len(),
         link_count,
         ad_link_count,
@@ -174,5 +197,48 @@ fn extract_text(html: &str, max_chars: usize) -> ExtractedPage {
         has_lists,
         has_code_blocks,
         paywall_detected,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ignores_navigation_and_keeps_short_safety_qualifiers() {
+        let html = format!(
+            "<nav><ul><li>{}</li></ul></nav><main><h2>Cancellation safety</h2>             <p>The following methods are cancellation safe:</p><ul><li>recv</li></ul>             <p>The following methods are not cancellation safe:</p>             <ul><li>read_exact</li><li>write_all</li></ul></main>",
+            "unrelated navigation ".repeat(100)
+        );
+        let page = extract_text(&html, 800);
+        assert!(!page.text.contains("navigation"), "{}", page.text);
+        for expected in [
+            "Cancellation safety",
+            "recv",
+            "not cancellation safe",
+            "read_exact",
+            "write_all",
+        ] {
+            assert!(
+                page.text.contains(expected),
+                "missing {expected}: {}",
+                page.text
+            );
+        }
+    }
+
+    #[test]
+    fn drops_noise_descendants_even_when_their_joined_text_is_long() {
+        let html = "<main><aside><p>Cookie settings <b>and other irrelevant banners</b></p></aside>             <h2>Limits</h2><p>Only read and write, not read_exact or write_all, are safe here.</p></main>";
+        let page = extract_text(html, 800);
+        assert!(!page.text.contains("Cookie"), "{}", page.text);
+        assert!(page.text.contains("not read_exact or write_all"));
+        assert!(page.text.contains("Limits"));
+    }
+
+    #[test]
+    fn max_chars_is_a_unicode_character_budget() {
+        let page = extract_text("<main><p>șțâîă漢字abcdefghijk</p></main>", 8);
+        assert_eq!(page.text, "șțâîă漢字a");
     }
 }

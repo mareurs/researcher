@@ -58,7 +58,7 @@ regex = "1"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-# Linux lifecycle syscalls (PR_SET_PDEATHSIG for MCP stdio self-defense)
+# Linux lifecycle syscalls (getppid for MCP parent-process monitoring)
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 

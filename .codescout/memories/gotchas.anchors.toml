@@ -3,20 +3,24 @@
 
 [[anchors]]
 path = "src/mcp_server.rs"
-hash = "6db5a21cf6175ea6c7edb1c4a5964a72e8348eca0635013029ca21b76ac59cb3"
-
-[[anchors]]
-path = "src/search/searxng.rs"
-hash = "29fb873b20b352d3eccfd6315e84e2bc23db6b9e2c19417f3bd2484efa04ce8a"
+hash = "90dd5524ada6fe2ec8b6acc0cb0b1f17176cb4b51e709da04e7c8f99eaebafc4"
 
 [[anchors]]
 path = "src/researcher/crawler.rs"
-hash = "70b852092d61661d8607c7f3686494b551b5a799a4f46bb05ba4e8da92128d78"
+hash = "355a80eab47ac09727c823f3e8c8a331cae39fd799735303a02747ecb0e77260"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "70078d89874d115ca6673923e6598ca85956e672d1b5a2936c7d9f1917ae6c4a"
+hash = "c08c20f821c6088e61c625d23211a4b5ef6b0a91c6e1532a0e10f95e66a227c0"
+
+[[anchors]]
+path = "docs/evals/researcher-quality-repair-20261023.json"
+hash = "a5efdf03f90123c63d6b3c84aed7be25341194f3ad3f433960e5fbee7eb9e4bf"
+
+[[anchors]]
+path = "src/search/searxng.rs"
+hash = "2f9d7bf57b144c55798e5a752416a9064a817f4147a6f400cfe185835c9ce3ae"
 
 [[anchors]]
 path = "src/embeddings/reranker.rs"
-hash = "5a784b47267e8c5152552564291c331522b60f2185dedc04fd0729c3a10b879f"
+hash = "2a313b374b0da364729dcbf090071e84c78b6185d721c928d4dd425d17c1a05c"

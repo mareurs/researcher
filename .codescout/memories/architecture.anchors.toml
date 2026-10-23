@@ -3,20 +3,20 @@
 
 [[anchors]]
 path = "src/main.rs"
-hash = "83136526ec64b06fc7e3a8c3fece24f57533770d8e4b470e91947e7897004deb"
+hash = "09ba81170a278d2e127a2c4898b2d241815819dea55db8e6af3d12a43dc9bb6f"
 
 [[anchors]]
 path = "src/mcp_server.rs"
-hash = "6db5a21cf6175ea6c7edb1c4a5964a72e8348eca0635013029ca21b76ac59cb3"
+hash = "90dd5524ada6fe2ec8b6acc0cb0b1f17176cb4b51e709da04e7c8f99eaebafc4"
 
 [[anchors]]
 path = "src/config.rs"
-hash = "371c64dad0920b72e3f4b98d668e3929a20d8261db132e918fe18c357274720e"
+hash = "07de6809122a2a50356fcd29f1bb8c80d473d08bc2df5cbdb1041d604d5c632d"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "9e87f7ca8d526931ed49837dec2c9c0adaeab92f401ae1ba556d5f58c4d8ca39"
+hash = "16fd91e15ae155eb5bf84c7446b996cc2fece222ecbf2e262bfce46e6828452b"
 
 [[anchors]]
 path = "src/researcher/pipeline.rs"
-hash = "0525c45fdd81e94cf3423787484a255222edf221feaf106a8762d199afcd56a1"
+hash = "0ee7c31bf1c2be4f0fb5bb8fa1ac536e7ea11bec6f27f6ad40d6a91934d89fb8"

@@ -26,21 +26,18 @@ mod trace;
 
 use anyhow::Result;
 use rmcp::{
-    ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{JsonObject, ServerCapabilities, ServerInfo},
-    schemars, tool, tool_handler, tool_router,
-    ServiceExt,
+    schemars, tool, tool_handler, tool_router, ServerHandler, ServiceExt,
 };
-use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc as StdArc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use config::Config;
-use crate::researcher::progressive::maybe_disclose;
 use crate::llm::client::LlmClient;
-
+use crate::researcher::progressive::maybe_disclose;
+use config::Config;
 
 // ── Tool inputSchema sanitizer ────────────────────────────────────────────────
 //
@@ -233,10 +230,7 @@ fn logged_stdio(idle: StdArc<IdleState>) -> (LoggedStdin, LoggedStdout) {
             log: log.clone(),
             idle,
         },
-        LoggedStdout {
-            inner: stdout,
-            log,
-        },
+        LoggedStdout { inner: stdout, log },
     )
 }
 
@@ -307,6 +301,30 @@ impl Drop for InFlightGuard {
     }
 }
 
+/// Track the parent process rather than the thread that spawned us:
+/// PR_SET_PDEATHSIG also fires when that thread exits inside a living client.
+#[cfg(target_os = "linux")]
+fn spawn_parent_watcher() {
+    // SAFETY: getppid takes no arguments or pointers and has no preconditions.
+    let parent_pid = unsafe { libc::getppid() };
+    if parent_pid == 1 {
+        std::process::exit(0);
+    }
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            // Reparenting also detects death when a subreaper, rather than PID 1,
+            // adopts us. A launching thread's exit leaves getppid unchanged.
+            // SAFETY: getppid takes no arguments or pointers.
+            if unsafe { libc::getppid() } != parent_pid {
+                tracing::info!("MCP parent process exited — shutting down");
+                std::process::exit(0);
+            }
+        }
+    });
+}
+
 /// Spawn a background task that exits the process once the client has sent no
 /// traffic for `timeout_secs` and no tool call is running. `timeout_secs == 0`
 /// disables the watcher (default).
@@ -347,19 +365,30 @@ where
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
             write!(f, "a non-negative integer or string representing one")
         }
-        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> { Ok(Some(v as usize)) }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            Ok(Some(v as usize))
+        }
         fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
-            if v < 0 { Err(de::Error::invalid_value(Unexpected::Signed(v), &self)) }
-            else { Ok(Some(v as usize)) }
+            if v < 0 {
+                Err(de::Error::invalid_value(Unexpected::Signed(v), &self))
+            } else {
+                Ok(Some(v as usize))
+            }
         }
         fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
-            v.parse::<usize>().map(Some).map_err(|_| de::Error::invalid_value(Unexpected::Str(v), &self))
+            v.parse::<usize>()
+                .map(Some)
+                .map_err(|_| de::Error::invalid_value(Unexpected::Str(v), &self))
         }
-        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> { Ok(None) }
+        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
         fn visit_some<D2: serde::Deserializer<'de>>(self, d: D2) -> Result<Self::Value, D2::Error> {
             d.deserialize_any(V)
         }
-        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> { Ok(None) }
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
     }
     d.deserialize_option(V)
 }
@@ -380,7 +409,10 @@ where
         type Value = Option<Vec<String>>;
 
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            write!(f, "array of strings, JSON-encoded array string, or comma-separated string")
+            write!(
+                f,
+                "array of strings, JSON-encoded array string, or comma-separated string"
+            )
         }
 
         fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
@@ -423,7 +455,9 @@ where
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ResearchInput {
-    #[schemars(description = "Research subject or question. For target=code, this is the framework/library name.")]
+    #[schemars(
+        description = "Research subject or question. For target=code, this is the framework/library name."
+    )]
     pub query: String,
 
     #[schemars(description = "topic(default)|person|company|market|code|jobs")]
@@ -438,7 +472,9 @@ pub struct ResearchInput {
     #[schemars(description = "named preset: shopping-ro,tech-news,llm-news,academic,news,travel")]
     pub domain_profile: Option<String>,
 
-    #[schemars(description = "ad-hoc domain filter list; unions with domain_profile. Pass as JSON array: [\"example.com\",\"docs.rs\"]")]
+    #[schemars(
+        description = "ad-hoc domain filter list; unions with domain_profile. Pass as JSON array: [\"example.com\",\"docs.rs\"]"
+    )]
     #[serde(default, deserialize_with = "deser_opt_string_or_vec")]
     pub domains: Option<Vec<String>>,
 
@@ -465,7 +501,9 @@ pub struct ResearchInput {
     #[schemars(description = "[code] version or 'latest'")]
     pub version: Option<String>,
 
-    #[schemars(description = "[code] ARRAY of aspects: bugs, changelog, community, releases (default: [\"bugs\",\"changelog\",\"community\"]). Pass as JSON array, not a string.")]
+    #[schemars(
+        description = "[code] ARRAY of aspects: bugs, changelog, community, releases (default: [\"bugs\",\"changelog\",\"community\"]). Pass as JSON array, not a string."
+    )]
     #[serde(default, deserialize_with = "deser_opt_string_or_vec")]
     pub aspects: Option<Vec<String>>,
 
@@ -475,7 +513,9 @@ pub struct ResearchInput {
     #[schemars(description = "[code] keyword to narrow search within the framework")]
     pub keywords: Option<String>,
 
-    #[schemars(description = "If true, bypass progressive disclosure and return raw JSON ResearchResult {report, sources, queries}. Default false.")]
+    #[schemars(
+        description = "If true, bypass progressive disclosure and return raw JSON ResearchResult {report, sources, queries}. Default false."
+    )]
     #[serde(default)]
     pub raw_json: Option<bool>,
 }
@@ -511,9 +551,7 @@ impl ResearcherServer {
     async fn research(
         &self,
         Parameters(input): Parameters<ResearchInput>,
-    ) -> String {
-        // Hold the process alive for the duration of the call and refresh the
-        // idle timer, so the idle watcher never reaps us mid-research.
+    ) -> rmcp::model::CallToolResult {
         let _guard = InFlightGuard::new(self.idle.clone());
         tracing::info!(
             target = ?input.target,
@@ -521,31 +559,43 @@ impl ResearcherServer {
             query = %input.query,
             "research tool invoked"
         );
-        match input.target.as_deref().unwrap_or("topic") {
-            "person"  => dispatch_person(self.cfg.clone(), input).await,
+        let result = match input.target.as_deref().unwrap_or("topic") {
+            "person" => dispatch_person(self.cfg.clone(), input).await,
             "company" => dispatch_company(self.cfg.clone(), input).await,
-            "market"  => dispatch_market(self.cfg.clone(), input).await,
-            "code"    => dispatch_code(self.cfg.clone(), input).await,
-            "jobs"    => dispatch_jobs(self.cfg.clone(), input).await,
-            _         => dispatch_topic(self.cfg.clone(), input).await,
+            "market" => dispatch_market(self.cfg.clone(), input).await,
+            "code" => dispatch_code(self.cfg.clone(), input).await,
+            "jobs" => dispatch_jobs(self.cfg.clone(), input).await,
+            _ => dispatch_topic(self.cfg.clone(), input).await,
+        };
+        match result {
+            Ok(text) => {
+                rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(text)])
+            }
+            Err(error) => rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                format!("Error: {error:#}"),
+            )]),
         }
     }
 }
 
-async fn dispatch_topic(cfg: std::sync::Arc<Config>, input: ResearchInput) -> String {
+async fn dispatch_topic(cfg: std::sync::Arc<Config>, input: ResearchInput) -> Result<String> {
     use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest, ResearchTarget};
 
     let mode = match input.mode.as_deref().unwrap_or("report") {
-        "quick"   => ResearchMode::Quick,
+        "quick" => ResearchMode::Quick,
         "summary" => ResearchMode::Summary,
-        "deep"    => ResearchMode::Deep,
-        _         => ResearchMode::Report,
+        "deep" => ResearchMode::Deep,
+        _ => ResearchMode::Report,
     };
 
     let cfg_owned: Option<Config> = if input.max_queries.is_some() || input.max_sources.is_some() {
         let mut owned = (*cfg).clone();
-        if let Some(mq) = input.max_queries   { owned.max_search_queries    = mq; }
-        if let Some(ms) = input.max_sources   { owned.max_sources_per_query = ms; }
+        if let Some(mq) = input.max_queries {
+            owned.max_search_queries = mq;
+        }
+        if let Some(ms) = input.max_sources {
+            owned.max_sources_per_query = ms;
+        }
         Some(owned)
     } else {
         None
@@ -564,36 +614,47 @@ async fn dispatch_topic(cfg: std::sync::Arc<Config>, input: ResearchInput) -> St
     match run(cfg_use, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
         Ok(r) => {
             if input.raw_json.unwrap_or(false) {
-                return serde_json::to_string(&r).unwrap_or_else(|e| format!("Error serializing result: {e}"));
+                return Ok(serde_json::to_string(&r)?);
             }
             let llm = LlmClient::new(cfg_use);
             let style = input.summary_style.as_deref().unwrap_or("abstract");
-            match maybe_disclose(&llm, &request.topic, &r, style, cfg_use.progressive_disclosure_chars).await {
-                Ok(d)  => d.into_string(),
+            match maybe_disclose(
+                &llm,
+                &request.topic,
+                &r,
+                style,
+                cfg_use.progressive_disclosure_chars,
+            )
+            .await
+            {
+                Ok(d) => Ok(d.into_string()),
                 Err(e) => {
                     eprintln!("[researcher] progressive disclosure failed: {e:#}");
-                    serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
+                    Ok(serde_json::to_string_pretty(&r)?)
                 }
             }
         }
-        Err(e) => format!("Error: {e:#}"),
+        Err(e) => Err(e),
     }
 }
 
-async fn dispatch_person(cfg: std::sync::Arc<Config>, input: ResearchInput) -> String {
-    use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest, ResearchTarget, PersonMethod};
+async fn dispatch_person(cfg: std::sync::Arc<Config>, input: ResearchInput) -> Result<String> {
+    use crate::researcher::pipeline::{
+        run, PersonMethod, ResearchMode, ResearchRequest, ResearchTarget,
+    };
 
-    let method: PersonMethod = input.person_method
+    let method: PersonMethod = input
+        .person_method
         .as_deref()
         .unwrap_or("both")
         .parse()
         .unwrap_or(PersonMethod::Both);
 
     let mode = match input.mode.as_deref().unwrap_or("report") {
-        "quick"   => ResearchMode::Quick,
+        "quick" => ResearchMode::Quick,
         "summary" => ResearchMode::Summary,
-        "deep"    => ResearchMode::Deep,
-        _         => ResearchMode::Report,
+        "deep" => ResearchMode::Deep,
+        _ => ResearchMode::Report,
     };
 
     let request = ResearchRequest {
@@ -608,30 +669,38 @@ async fn dispatch_person(cfg: std::sync::Arc<Config>, input: ResearchInput) -> S
     match run(&cfg, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
         Ok(r) => {
             if input.raw_json.unwrap_or(false) {
-                return serde_json::to_string(&r).unwrap_or_else(|e| format!("Error serializing result: {e}"));
+                return Ok(serde_json::to_string(&r)?);
             }
             let llm = LlmClient::new(&cfg);
             let style = input.summary_style.as_deref().unwrap_or("abstract");
-            match maybe_disclose(&llm, &request.topic, &r, style, cfg.progressive_disclosure_chars).await {
-                Ok(d)  => d.into_string(),
+            match maybe_disclose(
+                &llm,
+                &request.topic,
+                &r,
+                style,
+                cfg.progressive_disclosure_chars,
+            )
+            .await
+            {
+                Ok(d) => Ok(d.into_string()),
                 Err(e) => {
                     eprintln!("[researcher] progressive disclosure failed: {e:#}");
-                    serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
+                    Ok(serde_json::to_string_pretty(&r)?)
                 }
             }
         }
-        Err(e) => format!("Error: {e:#}"),
+        Err(e) => Err(e),
     }
 }
 
-async fn dispatch_company(cfg: std::sync::Arc<Config>, input: ResearchInput) -> String {
+async fn dispatch_company(cfg: std::sync::Arc<Config>, input: ResearchInput) -> Result<String> {
     use crate::researcher::pipeline::{run, ResearchMode, ResearchRequest, ResearchTarget};
 
     let mode = match input.mode.as_deref().unwrap_or("report") {
-        "quick"   => ResearchMode::Quick,
+        "quick" => ResearchMode::Quick,
         "summary" => ResearchMode::Summary,
-        "deep"    => ResearchMode::Deep,
-        _         => ResearchMode::Report,
+        "deep" => ResearchMode::Deep,
+        _ => ResearchMode::Report,
     };
 
     let topic = if let Some(c) = input.country {
@@ -652,36 +721,47 @@ async fn dispatch_company(cfg: std::sync::Arc<Config>, input: ResearchInput) -> 
     match run(&cfg, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
         Ok(r) => {
             if input.raw_json.unwrap_or(false) {
-                return serde_json::to_string(&r).unwrap_or_else(|e| format!("Error serializing result: {e}"));
+                return Ok(serde_json::to_string(&r)?);
             }
             let llm = LlmClient::new(&cfg);
             let style = input.summary_style.as_deref().unwrap_or("abstract");
-            match maybe_disclose(&llm, &request.topic, &r, style, cfg.progressive_disclosure_chars).await {
-                Ok(d)  => d.into_string(),
+            match maybe_disclose(
+                &llm,
+                &request.topic,
+                &r,
+                style,
+                cfg.progressive_disclosure_chars,
+            )
+            .await
+            {
+                Ok(d) => Ok(d.into_string()),
                 Err(e) => {
                     eprintln!("[researcher] progressive disclosure failed: {e:#}");
-                    serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
+                    Ok(serde_json::to_string_pretty(&r)?)
                 }
             }
         }
-        Err(e) => format!("Error: {e:#}"),
+        Err(e) => Err(e),
     }
 }
 
-async fn dispatch_market(cfg: std::sync::Arc<Config>, input: ResearchInput) -> String {
-    use crate::researcher::pipeline::{run, AssetClass, ResearchMode, ResearchRequest, ResearchTarget};
+async fn dispatch_market(cfg: std::sync::Arc<Config>, input: ResearchInput) -> Result<String> {
+    use crate::researcher::pipeline::{
+        run, AssetClass, ResearchMode, ResearchRequest, ResearchTarget,
+    };
 
-    let asset_class: AssetClass = input.asset_class
+    let asset_class: AssetClass = input
+        .asset_class
         .as_deref()
         .unwrap_or("macro")
         .parse()
         .unwrap_or_default();
 
     let mode = match input.mode.as_deref().unwrap_or("report") {
-        "quick"   => ResearchMode::Quick,
+        "quick" => ResearchMode::Quick,
         "summary" => ResearchMode::Summary,
-        "deep"    => ResearchMode::Deep,
-        _         => ResearchMode::Report,
+        "deep" => ResearchMode::Deep,
+        _ => ResearchMode::Report,
     };
 
     let target = ResearchTarget::Market { asset_class };
@@ -699,36 +779,52 @@ async fn dispatch_market(cfg: std::sync::Arc<Config>, input: ResearchInput) -> S
     match run(&cfg, &request, |ev| eprintln!("[researcher] {ev}"), None).await {
         Ok(r) => {
             if input.raw_json.unwrap_or(false) {
-                return serde_json::to_string(&r).unwrap_or_else(|e| format!("Error serializing result: {e}"));
+                return Ok(serde_json::to_string(&r)?);
             }
             let llm = LlmClient::new(&cfg);
             let style = input.summary_style.as_deref().unwrap_or("abstract");
-            match maybe_disclose(&llm, &request.topic, &r, style, cfg.progressive_disclosure_chars).await {
-                Ok(d)  => d.into_string(),
+            match maybe_disclose(
+                &llm,
+                &request.topic,
+                &r,
+                style,
+                cfg.progressive_disclosure_chars,
+            )
+            .await
+            {
+                Ok(d) => Ok(d.into_string()),
                 Err(e) => {
                     eprintln!("[researcher] progressive disclosure failed: {e:#}");
-                    serde_json::to_string_pretty(&r).unwrap_or_else(|e| e.to_string())
+                    Ok(serde_json::to_string_pretty(&r)?)
                 }
             }
         }
-        Err(e) => format!("Error: {e:#}"),
+        Err(e) => Err(e),
     }
 }
 
-async fn dispatch_code(cfg: std::sync::Arc<Config>, input: ResearchInput) -> String {
+async fn dispatch_code(cfg: std::sync::Arc<Config>, input: ResearchInput) -> Result<String> {
     use crate::researcher::crawler::crawl_all;
-    use crate::researcher::summarizer::summarize_all;
-    use crate::researcher::publisher::write_code_report;
     use crate::researcher::pipeline::ResearchResult;
+    use crate::researcher::publisher::write_code_report;
+    use crate::researcher::summarizer::summarize_all;
 
     let version = input.version.as_deref().unwrap_or("latest").to_string();
     let framework = input.query.clone();
     let aspects = input.aspects.unwrap_or_else(|| {
-        vec!["bugs".to_string(), "changelog".to_string(), "community".to_string()]
+        vec![
+            "bugs".to_string(),
+            "changelog".to_string(),
+            "community".to_string(),
+        ]
     });
 
     let q = input.keywords.as_deref().unwrap_or("").trim().to_string();
-    let q_suffix = if q.is_empty() { String::new() } else { format!(" {q}") };
+    let q_suffix = if q.is_empty() {
+        String::new()
+    } else {
+        format!(" {q}")
+    };
 
     let mut queries: Vec<String> = Vec::new();
     for aspect in &aspects {
@@ -736,21 +832,29 @@ async fn dispatch_code(cfg: std::sync::Arc<Config>, input: ResearchInput) -> Str
             "bugs" => {
                 queries.push(format!("{framework} {version}{q_suffix} bug issue"));
                 if let Some(repo) = &input.repo {
-                    queries.push(format!("{framework} {version}{q_suffix} issue site:github.com/{repo}/issues"));
+                    queries.push(format!(
+                        "{framework} {version}{q_suffix} issue site:github.com/{repo}/issues"
+                    ));
                 }
             }
             "changelog" => {
-                queries.push(format!("{framework} {version}{q_suffix} changelog release notes"));
+                queries.push(format!(
+                    "{framework} {version}{q_suffix} changelog release notes"
+                ));
                 queries.push(format!("{framework} {version}{q_suffix} breaking changes"));
             }
             "community" => {
                 queries.push(format!("{framework} {version}{q_suffix} site:reddit.com"));
-                queries.push(format!("{framework} {version}{q_suffix} site:news.ycombinator.com"));
+                queries.push(format!(
+                    "{framework} {version}{q_suffix} site:news.ycombinator.com"
+                ));
             }
             "releases" => {
                 queries.push(format!("{framework} {version}{q_suffix} release"));
                 if let Some(repo) = &input.repo {
-                    queries.push(format!("{framework} {version}{q_suffix} site:github.com/{repo}/releases"));
+                    queries.push(format!(
+                        "{framework} {version}{q_suffix} site:github.com/{repo}/releases"
+                    ));
                 }
             }
             _ => {}
@@ -766,12 +870,12 @@ async fn dispatch_code(cfg: std::sync::Arc<Config>, input: ResearchInput) -> Str
 
     let sources = crawl_all(&http, &cfg, &queries).await;
     if sources.is_empty() {
-        return format!("Error: no sources found for {topic}");
+        anyhow::bail!("no sources found for {topic}");
     }
 
     let summaries = summarize_all(&llm, &sources, &topic).await;
     if summaries.is_empty() {
-        return format!("Error: could not summarize sources for {topic}");
+        anyhow::bail!("could not summarize sources for {topic}");
     }
 
     match write_code_report(&llm, &summaries, &framework, &version, &aspects).await {
@@ -783,29 +887,38 @@ async fn dispatch_code(cfg: std::sync::Arc<Config>, input: ResearchInput) -> Str
                 queries,
             };
             if input.raw_json.unwrap_or(false) {
-                return serde_json::to_string(&result).unwrap_or_else(|e| format!("Error serializing result: {e}"));
+                return Ok(serde_json::to_string(&result)?);
             }
-            match maybe_disclose(&llm, &framework, &result, style, cfg.progressive_disclosure_chars).await {
-                Ok(d)  => d.into_string(),
+            match maybe_disclose(
+                &llm,
+                &framework,
+                &result,
+                style,
+                cfg.progressive_disclosure_chars,
+            )
+            .await
+            {
+                Ok(d) => Ok(d.into_string()),
                 Err(e) => {
                     eprintln!("[researcher] progressive disclosure failed: {e:#}");
-                    result.report.unwrap_or_default()
+                    Ok(result.report.unwrap_or_default())
                 }
             }
         }
-        Err(e) => format!("Error writing report: {e:#}"),
+        Err(e) => Err(e.context("writing report")),
     }
 }
 
-async fn dispatch_jobs(cfg: std::sync::Arc<Config>, input: ResearchInput) -> String {
+async fn dispatch_jobs(cfg: std::sync::Arc<Config>, input: ResearchInput) -> Result<String> {
     use crate::jobs::fetcher::fetch_jobs;
-    use crate::jobs::scorer::score_listings;
     use crate::jobs::publisher::write_job_report;
+    use crate::jobs::scorer::score_listings;
 
     let profile = match &cfg.job_profile {
         Some(p) => p.clone(),
-        None => return "Error: no [job-profile] section found in profiles.toml. \
-                        Add one to enable job search.".to_string(),
+        None => anyhow::bail!(
+            "no [job-profile] section found in profiles.toml. Add one to enable job search."
+        ),
     };
 
     let deep = input.mode.as_deref() == Some("deep");
@@ -820,12 +933,12 @@ async fn dispatch_jobs(cfg: std::sync::Arc<Config>, input: ResearchInput) -> Str
 
     let scored = match score_listings(&llm, &listings, &profile, 6).await {
         Ok(s) => s,
-        Err(e) => return format!("Error scoring listings: {e:#}"),
+        Err(e) => return Err(e.context("scoring listings")),
     };
 
     match write_job_report(&cfg, &scored, &input.query, deep).await {
-        Ok(report) => report,
-        Err(e) => format!("Error writing report: {e:#}"),
+        Ok(report) => Ok(report),
+        Err(e) => Err(e.context("writing report")),
     }
 }
 
@@ -892,19 +1005,8 @@ async fn main() -> Result<()> {
         .with(fmt::layer().with_writer(std::io::stderr).with_ansi(false))
         .init();
 
-    // Lifecycle self-defense: exit if our parent dies while we keep running.
-    // Covers the "parent killed, child reparented to init" stranding variant.
     #[cfg(target_os = "linux")]
-    // SAFETY: prctl(PR_SET_PDEATHSIG) and getppid() are argument-only syscalls
-    // with no memory-safety preconditions; we pass a valid signal number and
-    // read the returned ppid. No pointers are dereferenced.
-    unsafe {
-        libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as libc::c_ulong, 0, 0, 0);
-        // Race: the parent may have already exited before the prctl above ran.
-        if libc::getppid() == 1 {
-            std::process::exit(0);
-        }
-    }
+    spawn_parent_watcher();
 
     // Config from env vars (no --server or --query flags needed in MCP mode)
     let cfg = Config {
@@ -977,6 +1079,7 @@ fn config_from_env() -> Config {
         output: None,
         llm_base_url: env("LLM_BASE_URL", "http://localhost:8080/v1"),
         llm_model: env("LLM_MODEL", "Qwen_Qwen3.5-9B-Q4_K_M"),
+        llm_verifier_model: env("LLM_VERIFIER_MODEL", ""),
         llm_provider: env("LLM_PROVIDER", "openai"),
         llm_api_key: env("LLM_API_KEY", "no-key-needed"),
         llm_max_tokens: env_usize("LLM_MAX_TOKENS", 4096) as u32,
@@ -1005,7 +1108,7 @@ fn config_from_env() -> Config {
         rerank_relevance_weight: env_f32("RERANK_RELEVANCE_WEIGHT", 0.7),
         rerank_authority_weight: env_f32("RERANK_AUTHORITY_WEIGHT", 0.2),
         rerank_quality_weight: env_f32("RERANK_QUALITY_WEIGHT", 0.1),
-        rerank_min_score: env_f32("RERANK_MIN_SCORE", -5.0),
+        rerank_min_score: env_f32("RERANK_MIN_SCORE", f32::NEG_INFINITY),
         langfuse_host: env("LANGFUSE_HOST", ""),
         langfuse_public_key: env("LANGFUSE_PUBLIC_KEY", ""),
         langfuse_secret_key: env("LANGFUSE_SECRET_KEY", ""),
@@ -1021,10 +1124,10 @@ fn config_from_env() -> Config {
         cli_domains: vec![],
         profiles: crate::config::load_profiles(),
         auth: config::AuthConfig {
-            linkedin_cookie:  std::env::var("LINKEDIN_COOKIE").ok(),
-            fb_cookie:        std::env::var("FB_COOKIE").ok(),
+            linkedin_cookie: std::env::var("LINKEDIN_COOKIE").ok(),
+            fb_cookie: std::env::var("FB_COOKIE").ok(),
             instagram_cookie: std::env::var("INSTAGRAM_COOKIE").ok(),
-            twitter_cookie:   std::env::var("TWITTER_COOKIE").ok(),
+            twitter_cookie: std::env::var("TWITTER_COOKIE").ok(),
         },
         job_profile: config::load_job_profile(),
         progressive_disclosure_chars: env_usize("PROGRESSIVE_DISCLOSURE_CHARS", 4000),
@@ -1067,7 +1170,6 @@ mod langfuse_config_tests {
         assert!(cfg.judge_enabled);
         std::env::remove_var("LLM_JUDGE_ENABLED");
     }
-
 }
 
 #[cfg(test)]

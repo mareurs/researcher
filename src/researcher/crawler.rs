@@ -6,6 +6,44 @@ use tracing::{debug, warn};
 use crate::config::Config;
 use crate::scraper::html::fetch_and_extract;
 
+/// Retrieval provenance describes the observed snapshot, not the page's publication time.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct SourceProvenance {
+    pub origin: SourceOrigin,
+    pub retrieved_at: String,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceOrigin {
+    FetchedPage,
+    SearchSnippet,
+    ProviderExtract,
+    #[default]
+    Unknown,
+}
+
+impl SourceProvenance {
+    pub fn observed(origin: SourceOrigin, truncated: bool) -> Self {
+        Self {
+            origin,
+            retrieved_at: chrono::Utc::now().to_rfc3339(),
+            truncated,
+        }
+    }
+    pub fn description(&self) -> String {
+        let origin = serde_json::to_value(self.origin).unwrap();
+        format!("Origin: {}\nRetrieved at: {} (observation time, not publication time)\nTruncated: {}\nFreshness: {}",
+            origin.as_str().unwrap(), self.retrieved_at, self.truncated,
+            match self.origin {
+                SourceOrigin::SearchSnippet => "A search snippet does not verify current price or stock.",
+                SourceOrigin::ProviderExtract => "Provider extraction has unverified cache age; current price or stock is unverified.",
+                SourceOrigin::FetchedPage => "Fetched page snapshot; only explicit quoted price/stock wording is evidence at retrieval time.",
+                SourceOrigin::Unknown => "Unknown retrieval origin and freshness; current price or stock is unverified.",
+            })
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ScrapedSource {
@@ -13,6 +51,7 @@ pub struct ScrapedSource {
     pub title: String,
     pub query: String,
     pub content: String,
+    pub provenance: SourceProvenance,
     pub domain: String,
     pub word_count: usize,
     pub raw_html_len: usize,
@@ -25,15 +64,11 @@ pub struct ScrapedSource {
 }
 
 fn domain_from_url(url: &str) -> String {
-    url.split("://")
-        .nth(1)
-        .unwrap_or("")
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .to_lowercase()
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .unwrap_or_default()
 }
-
 
 /// Domains that consistently return off-topic results and should never be scraped.
 /// e.g. "Rust" the game showing up in Rust programming language searches.
@@ -68,7 +103,6 @@ const DOMAIN_BLACKLIST: &[&str] = &[
     "udemy.com",
     "khanacademy.org",
 ];
-
 
 /// For a single sub-question: search → deduplicate URLs → scrape in parallel.
 pub async fn crawl_query(
@@ -112,7 +146,10 @@ pub async fn crawl_query(
         .into_iter()
         .filter(|r| {
             let host = domain_from_url(&r.url);
-            if DOMAIN_BLACKLIST.iter().any(|b| host == *b || host.ends_with(&format!(".{b}"))) {
+            if DOMAIN_BLACKLIST
+                .iter()
+                .any(|b| host == *b || host.ends_with(&format!(".{b}")))
+            {
                 debug!(url = %r.url, "skipping blacklisted domain");
                 return false;
             }
@@ -128,13 +165,15 @@ pub async fn crawl_query(
     debug!(count = fresh.len(), %query, "scraping URLs");
 
     // 3. Partition: pre-extracted content (Tavily/Exa) vs needs scraping
-    let (pre_extracted, needs_scraping): (Vec<_>, Vec<_>) =
-        fresh.into_iter().partition(|r| r.content.as_deref().is_some_and(|c| !c.is_empty()));
+    let (pre_extracted, needs_scraping): (Vec<_>, Vec<_>) = fresh
+        .into_iter()
+        .partition(|r| r.content.as_deref().is_some_and(|c| !c.is_empty()));
 
     // Build ScrapedSource for pre-extracted results — no HTTP fetch needed
     let mut sources: Vec<ScrapedSource> = pre_extracted
         .into_iter()
         .map(|result| {
+            let truncated = result.content.as_ref().unwrap().chars().count() > cfg.max_page_chars;
             let content: String = result
                 .content
                 .unwrap()
@@ -157,6 +196,7 @@ pub async fn crawl_query(
                 has_code_blocks: false,
                 paywall_detected: false,
                 content,
+                provenance: SourceProvenance::observed(SourceOrigin::ProviderExtract, truncated),
             }
         })
         .collect();
@@ -167,7 +207,13 @@ pub async fn crawl_query(
         let url = result.url.clone();
         let max_chars = cfg.max_page_chars;
         let cookie: Option<String> = {
-            let host = url.split("://").nth(1).unwrap_or("").split('/').next().unwrap_or("");
+            let host = url
+                .split("://")
+                .nth(1)
+                .unwrap_or("")
+                .split('/')
+                .next()
+                .unwrap_or("");
             cfg.auth.cookie_for_host(host).map(|c| c.to_string())
         };
         async move { fetch_and_extract(&http, &url, max_chars, cookie.as_deref()).await }
@@ -175,62 +221,68 @@ pub async fn crawl_query(
 
     let scraped = join_all(futs).await;
 
-    sources.extend(
-        needs_scraping
-            .into_iter()
-            .zip(scraped)
-            .map(|(result, content)| match content {
-                Ok(page) => {
-                    let domain = domain_from_url(&result.url);
-                    let word_count = page.text.split_whitespace().count();
-                    ScrapedSource {
-                        url: result.url,
-                        title: result.title,
-                        query: query.to_string(),
-                        domain,
-                        word_count,
-                        raw_html_len: page.raw_html_len,
-                        link_count: page.link_count,
-                        ad_link_count: page.ad_link_count,
-                        has_headings: page.has_headings,
-                        has_lists: page.has_lists,
-                        has_code_blocks: page.has_code_blocks,
-                        paywall_detected: page.paywall_detected,
-                        content: page.text,
-                    }
+    sources.extend(needs_scraping.into_iter().zip(scraped).map(
+        |(result, content)| match content {
+            Ok(page) => {
+                let domain = domain_from_url(&page.final_url);
+                let word_count = page.text.split_whitespace().count();
+                ScrapedSource {
+                    url: page.final_url,
+                    title: result.title,
+                    query: query.to_string(),
+                    domain,
+                    word_count,
+                    raw_html_len: page.raw_html_len,
+                    link_count: page.link_count,
+                    ad_link_count: page.ad_link_count,
+                    has_headings: page.has_headings,
+                    has_lists: page.has_lists,
+                    has_code_blocks: page.has_code_blocks,
+                    paywall_detected: page.paywall_detected,
+                    content: page.text,
+                    provenance: SourceProvenance::observed(
+                        SourceOrigin::FetchedPage,
+                        page.truncated,
+                    ),
                 }
-                Err(e) => {
-                    warn!(%e, url = %result.url, "scrape failed, using snippet");
-                    let domain = domain_from_url(&result.url);
-                    let word_count = result.snippet.split_whitespace().count();
-                    ScrapedSource {
-                        url: result.url,
-                        title: result.title,
-                        query: query.to_string(),
-                        domain,
-                        word_count,
-                        raw_html_len: 0,
-                        link_count: 0,
-                        ad_link_count: 0,
-                        has_headings: false,
-                        has_lists: false,
-                        has_code_blocks: false,
-                        paywall_detected: false,
-                        content: result.snippet,
-                    }
+            }
+            Err(e) => {
+                warn!(%e, url = %result.url, "scrape failed, using snippet");
+                let domain = domain_from_url(&result.url);
+                let word_count = result.snippet.split_whitespace().count();
+                ScrapedSource {
+                    url: result.url,
+                    title: result.title,
+                    query: query.to_string(),
+                    domain,
+                    word_count,
+                    raw_html_len: 0,
+                    link_count: 0,
+                    ad_link_count: 0,
+                    has_headings: false,
+                    has_lists: false,
+                    has_code_blocks: false,
+                    paywall_detected: false,
+                    content: result.snippet,
+                    provenance: SourceProvenance::observed(SourceOrigin::SearchSnippet, false),
                 }
-            }),
-    );
+            }
+        },
+    ));
 
+    let mut final_urls = std::collections::HashSet::new();
+    sources.retain(|source| {
+        crate::search::domain_allowed(&source.url, &domains)
+            && !DOMAIN_BLACKLIST.iter().any(|blocked| {
+                source.domain == *blocked || source.domain.ends_with(&format!(".{blocked}"))
+            })
+            && final_urls.insert(source.url.clone())
+    });
     Ok(sources)
 }
 
 /// Run all sub-queries in parallel, collecting deduplicated sources.
-pub async fn crawl_all(
-    http: &Client,
-    cfg: &Config,
-    queries: &[String],
-) -> Vec<ScrapedSource> {
+pub async fn crawl_all(http: &Client, cfg: &Config, queries: &[String]) -> Vec<ScrapedSource> {
     let mut visited = std::collections::HashSet::new();
     let mut all_sources = Vec::new();
 
@@ -244,4 +296,102 @@ pub async fn crawl_all(
     }
 
     all_sources
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[tokio::test]
+    async fn failed_fetch_is_a_search_snippet_and_success_is_a_fetched_snapshot() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let base = format!("http://{address}");
+        let search_base = base.clone();
+        let app = axum::Router::new()
+            .route("/search", axum::routing::get(move || {
+                let base = search_base.clone();
+                async move { axum::Json(serde_json::json!({"results":[
+                    {"title":"Page","url":format!("{base}/page"),"content":"search snippet for fetched page"},
+                    {"title":"Missing","url":format!("{base}/missing"),"content":"Product price 374.99 RON in a cached search snippet only."}
+                ]})) }
+            }))
+            .route("/page", axum::routing::get(|| async { axum::response::Html(
+                "<main><p>Fetched page content with enough readable text to pass extraction. The full page is observed directly rather than inferred from the search snippet returned by an index.</p></main>") }));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut cfg = Config::parse_from(["researcher"]);
+        cfg.searxng_url = base;
+        cfg.brave_api_key.clear();
+        cfg.tavily_api_key.clear();
+        cfg.exa_api_key.clear();
+        cfg.cli_domains = vec!["127.0.0.1".into()];
+        cfg.domain_profile = None;
+        let sources = crawl_query(
+            &Client::new(),
+            &cfg,
+            "product price",
+            &mut Default::default(),
+        )
+        .await
+        .unwrap();
+        server.abort();
+        assert_eq!(sources.len(), 2);
+        let page = sources.iter().find(|s| s.url.ends_with("/page")).unwrap();
+        let snippet = sources
+            .iter()
+            .find(|s| s.url.ends_with("/missing"))
+            .unwrap();
+        assert_eq!(page.provenance.origin, SourceOrigin::FetchedPage);
+        assert_eq!(snippet.provenance.origin, SourceOrigin::SearchSnippet);
+        assert!(snippet.content.contains("cached search snippet"));
+        assert!(!page.provenance.retrieved_at.is_empty());
+        assert!(!snippet.provenance.retrieved_at.is_empty());
+    }
+    #[tokio::test]
+    async fn redirects_use_final_source_urls_and_cannot_escape_requested_domains() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let base = format!("http://{address}");
+        let search_base = base.clone();
+        let foreign = format!("http://localhost:{}/page", address.port());
+        let app = axum::Router::new()
+            .route("/search", axum::routing::get(move || {
+                let base = search_base.clone();
+                async move { axum::Json(serde_json::json!({"results":[
+                    {"title":"Moved","url":format!("{base}/moved"),"content":"search result"},
+                    {"title":"Off domain redirect","url":format!("{base}/escape"),"content":"search result"}
+                ]})) }
+            }))
+            .route("/moved", axum::routing::get(|| async { axum::response::Redirect::temporary("/page") }))
+            .route("/escape", axum::routing::get(move || {
+                let foreign = foreign.clone();
+                async move { axum::response::Redirect::temporary(&foreign) }
+            }))
+            .route("/page", axum::routing::get(|| async { axum::response::Html(
+                "<main><p>Fetched page content with enough readable text to pass extraction. This is the final destination of the redirect and must be attributed to its actual URL and host.</p></main>") }));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut cfg = Config::parse_from(["researcher"]);
+        cfg.searxng_url = base;
+        cfg.brave_api_key.clear();
+        cfg.tavily_api_key.clear();
+        cfg.exa_api_key.clear();
+        cfg.cli_domains = vec!["127.0.0.1".into()];
+        cfg.domain_profile = None;
+        let sources = crawl_query(
+            &Client::new(),
+            &cfg,
+            "source redirect",
+            &mut Default::default(),
+        )
+        .await
+        .unwrap();
+        server.abort();
+        assert_eq!(
+            sources.len(),
+            1,
+            "off-domain final URL must not supply page evidence"
+        );
+        assert!(sources[0].url.ends_with("/page"));
+        assert_eq!(sources[0].domain, "127.0.0.1");
+    }
 }

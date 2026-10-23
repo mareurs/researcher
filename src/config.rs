@@ -17,10 +17,10 @@ use clap::Parser;
 
 #[derive(Debug, Clone, Default)]
 pub struct AuthConfig {
-    pub linkedin_cookie:  Option<String>,
-    pub fb_cookie:        Option<String>,
+    pub linkedin_cookie: Option<String>,
+    pub fb_cookie: Option<String>,
     pub instagram_cookie: Option<String>,
-    pub twitter_cookie:   Option<String>,
+    pub twitter_cookie: Option<String>,
 }
 
 impl AuthConfig {
@@ -39,7 +39,6 @@ impl AuthConfig {
         }
     }
 }
-
 
 /// Researcher config — all values can come from env vars or CLI flags.
 #[derive(Debug, Clone, Parser)]
@@ -66,6 +65,10 @@ pub struct Config {
     #[arg(long, env = "LLM_MODEL", default_value = "Qwen_Qwen3.5-9B-Q4_K_M")]
     pub llm_model: String,
 
+    /// Optional independent grounding model served by the publisher backend.
+    #[arg(long, env = "LLM_VERIFIER_MODEL", default_value = "")]
+    pub llm_verifier_model: String,
+
     /// Provider for the primary LLM backend: openai | vertex
     #[arg(long, env = "LLM_PROVIDER", default_value = "openai")]
     pub llm_provider: String,
@@ -87,7 +90,6 @@ pub struct Config {
     pub strip_thinking_tokens: bool,
 
     // ── Fast LLM backend (structured tasks: planner, summarizer) ────────────
-
     /// Base URL for the fast/lightweight LLM backend (structured tasks).
     /// Empty string = fall back to LLM_BASE_URL.
     #[arg(long, env = "LLM_FAST_BASE_URL", default_value = "")]
@@ -169,9 +171,14 @@ pub struct Config {
     #[arg(long, env = "RERANK_QUALITY_WEIGHT", default_value = "0.1")]
     pub rerank_quality_weight: f32,
 
-    /// Minimum raw cross-encoder relevance score to keep a source (logit scale).
-    /// Sources below this are dropped after reranking. -5.0 drops clearly off-topic results.
-    #[arg(long, env = "RERANK_MIN_SCORE", default_value = "-5.0")]
+    /// Optional minimum raw model score, in the configured reranker's own units.
+    /// Disabled by default (-inf); calibrate explicitly before enabling.
+    #[arg(
+        long,
+        env = "RERANK_MIN_SCORE",
+        default_value = "-inf",
+        allow_hyphen_values = true
+    )]
     pub rerank_min_score: f32,
 
     // ── Tracing (Langfuse) ───────────────────────────────────────────────────
@@ -293,7 +300,6 @@ pub fn load_job_profile() -> Option<JobProfile> {
         .inspect_err(|e| tracing::warn!(error = %e, "failed to parse [job-profile] section"))
         .ok()
 }
-
 
 /// Load domain profiles from `profiles.toml` in the current directory.
 /// Returns empty map if the file is missing or malformed.

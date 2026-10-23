@@ -75,6 +75,7 @@ pub struct LlmClient {
     pub base_url: String,
     pub api_key: String,
     model: String,
+    verifier_model: String,
     max_tokens: u32,
     temperature: f32,
     strip_thinking: bool,
@@ -113,6 +114,7 @@ impl LlmClient {
             model: cfg.llm_model.clone(),
             max_tokens: cfg.llm_max_tokens,
             temperature: cfg.llm_temperature,
+            verifier_model: cfg.llm_verifier_model.clone(),
             strip_thinking: cfg.strip_thinking_tokens,
             disable_thinking: false,
             vertex_project: cfg.vertex_project.clone(),
@@ -121,6 +123,18 @@ impl LlmClient {
             gen_parent: None,
             gen_name: None,
         }
+    }
+    /// The verifier uses the same backend and auth, with an independently chosen model.
+    pub fn verifier(&self) -> Option<Self> {
+        if self.verifier_model.is_empty() {
+            return None;
+        }
+        let mut client = self.clone();
+        client.model = self.verifier_model.clone();
+        client.temperature = 0.0;
+        client.disable_thinking = false;
+        client.max_tokens = client.max_tokens.max(8192);
+        Some(client)
     }
 
     /// Build a client for the fast/lightweight LLM backend.
@@ -167,6 +181,7 @@ impl LlmClient {
             model,
             max_tokens,
             temperature: cfg.llm_temperature,
+            verifier_model: cfg.llm_verifier_model.clone(),
             strip_thinking: cfg.strip_thinking_tokens,
             disable_thinking: use_fast,
             vertex_project: cfg.vertex_project.clone(),
@@ -483,6 +498,7 @@ mod tests {
             bind_addr: String::new(),
             llm_base_url: DEFAULT_OPENAI_BASE_URL.to_string(),
             llm_model: "test-model".into(),
+            llm_verifier_model: String::new(),
             llm_provider: "openai".into(),
             llm_api_key: "no-key-needed".into(),
             llm_max_tokens: 256,
@@ -507,7 +523,7 @@ mod tests {
             rerank_relevance_weight: 0.7,
             rerank_authority_weight: 0.2,
             rerank_quality_weight: 0.1,
-            rerank_min_score: -5.0,
+            rerank_min_score: f32::NEG_INFINITY,
             langfuse_host: String::new(),
             langfuse_public_key: String::new(),
             langfuse_secret_key: String::new(),

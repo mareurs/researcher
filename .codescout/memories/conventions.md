@@ -19,10 +19,10 @@ See CLAUDE.md § Rust Coding Standards for the full style guide. This file captu
 - Scrape failures in `crawl_query()`: fall back to search snippet, do NOT propagate
 - Summarize failures in `summarize_all()`: silently drop with `warn!()`, not panic
 - Rerank failure: fall back to dedup/original order
-- MCP tools: catch all errors and return `format!("Error: {e:#}")` as String
+- MCP dispatch helpers propagate `Result<String>`; the tool boundary returns `CallToolResult::success` or `CallToolResult::error` with the full diagnostic chain. Failures must have `isError: true`.
 
 ### LLM Prompt Conventions
-- Prepend `/no_think` to system prompts for planner and summarizer (Qwen3 convention)
+- Planner and summarizer prepend `/no_think` (Qwen3 convention). The Vertex adapter removes only the leading `/no_think\n` system directive: the actual Gemini planning request returned `MALFORMED_RESPONSE` with it and `STOP` without it in controlled probes on 2026-10-23. Preserve literal occurrences elsewhere.
 - JSON output requested via explicit schema in system prompt
 - JSON parse failures: fall back to treating full response as plain text
 
@@ -46,7 +46,7 @@ join_all(futs).await
 ```
 
 ## Testing
-No Rust tests. Verify changes with `cargo check` (fast) then `cargo build --release` (full LTO, ~30-60s).
+Rust unit tests run in both binaries; `tests/mcp_lifecycle.rs` exercises the actual MCP stdio server on Linux, including launcher-thread exit, parent-process death with stdin held open, and error flags for all six targets. Run `cargo test`, `cargo check`, then `cargo build --release` before live MCP verification.
 Python tests exist in `tests/model/` for a planned cross-encoder module that isn't implemented yet (untracked in git).
 
 ## Code Quality

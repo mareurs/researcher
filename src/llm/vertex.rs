@@ -47,6 +47,15 @@ pub struct VertexUsage {
     pub prompt_token_count: u32,
     #[serde(default, rename = "candidatesTokenCount")]
     pub candidates_token_count: u32,
+    #[serde(default, rename = "thoughtsTokenCount")]
+    pub thoughts_token_count: u32,
+}
+impl VertexUsage {
+    /// Generated candidate and reasoning tokens are disjoint Vertex counters.
+    pub fn output_tokens(&self) -> u32 {
+        self.candidates_token_count
+            .saturating_add(self.thoughts_token_count)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,6 +69,25 @@ pub struct VertexResponse {
 #[derive(Debug, Deserialize)]
 pub struct VertexCandidate {
     pub content: Option<VertexResponseContent>,
+    #[serde(default, rename = "finishReason")]
+    pub finish_reason: Option<String>,
+    #[serde(default, rename = "finishMessage")]
+    pub finish_message: Option<String>,
+}
+
+impl VertexCandidate {
+    fn check_finish_reason(&self) -> Result<()> {
+        if let Some(reason) = self.finish_reason.as_deref() {
+            // Preserve existing partial-output behavior at the token limit.
+            if !matches!(reason, "STOP" | "MAX_TOKENS") {
+                bail!(
+                    "Vertex generation failed: finishReason={reason}; finishMessage={}",
+                    self.finish_message.as_deref().unwrap_or("not provided")
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,16 +103,20 @@ pub struct VertexResponsePart {
 }
 
 pub fn build_request(messages: &[ChatMessage], max_tokens: u32, temperature: f32) -> VertexRequest {
-    let mut iter = messages.iter();
-    let system_instruction = match iter.next() {
-        Some(msg) if msg.role == "system" => Some(VertexSystemInstruction {
+    let system_instruction = messages
+        .first()
+        .filter(|msg| msg.role == "system")
+        .map(|msg| VertexSystemInstruction {
             parts: vec![VertexTextPart {
-                text: msg.content.clone(),
+                // Qwen's control token can elicit MALFORMED_RESPONSE from Gemini.
+                // Keep literal occurrences elsewhere in the prompt unchanged.
+                text: msg
+                    .content
+                    .strip_prefix("/no_think\n")
+                    .unwrap_or(&msg.content)
+                    .to_string(),
             }],
-        }),
-        _ => None,
-    };
-
+        });
     let contents = messages
         .iter()
         .filter(|msg| msg.role != "system")
@@ -98,7 +130,6 @@ pub fn build_request(messages: &[ChatMessage], max_tokens: u32, temperature: f32
             }],
         })
         .collect();
-
     VertexRequest {
         system_instruction,
         contents,
@@ -110,11 +141,14 @@ pub fn build_request(messages: &[ChatMessage], max_tokens: u32, temperature: f32
 }
 
 pub fn extract_text(resp: VertexResponse) -> Result<String> {
-    let text = resp
+    let candidate = resp
         .candidates
         .into_iter()
         .next()
-        .and_then(|c| c.content)
+        .context("Vertex response contained no text candidate")?;
+    candidate.check_finish_reason()?;
+    let text = candidate
+        .content
         .map(|content| {
             content
                 .parts
@@ -125,11 +159,16 @@ pub fn extract_text(resp: VertexResponse) -> Result<String> {
         .unwrap_or_default()
         .trim()
         .to_string();
-
     if text.is_empty() {
-        bail!("Vertex response contained no text candidate");
+        bail!(
+            "Vertex response contained no text candidate; finishReason={}; finishMessage={}",
+            candidate.finish_reason.as_deref().unwrap_or("not provided"),
+            candidate
+                .finish_message
+                .as_deref()
+                .unwrap_or("not provided")
+        );
     }
-
     Ok(text)
 }
 
@@ -331,7 +370,7 @@ pub async fn complete(
     let (input_tokens, output_tokens) = vr
         .usage_metadata
         .as_ref()
-        .map(|u| (u.prompt_token_count, u.candidates_token_count))
+        .map(|u| (u.prompt_token_count, u.output_tokens()))
         .unwrap_or((0, 0));
     let text = extract_text(vr)?;
     Ok((text, input_tokens, output_tokens))
@@ -379,7 +418,10 @@ pub async fn stream(
                 }
                 if let Ok(chunk) = serde_json::from_str::<VertexResponse>(&ev.data) {
                     if let Some(u) = chunk.usage_metadata {
-                        usage = (u.prompt_token_count, u.candidates_token_count);
+                        usage = (u.prompt_token_count, u.output_tokens());
+                    }
+                    if let Some(candidate) = chunk.candidates.first() {
+                        candidate.check_finish_reason()?;
                     }
                     let token = stream_chunk_text(chunk);
                     if !token.is_empty() {
@@ -402,6 +444,9 @@ pub async fn stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Tests that replace the process-wide ADC token cache must share this lock.
+    static TEST_TOKEN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     #[test]
     fn build_request_maps_system_and_chat_history() {
@@ -436,10 +481,11 @@ mod tests {
                         text: Some("Hello".into()),
                     }],
                 }),
+                finish_reason: Some("STOP".into()),
+                finish_message: None,
             }],
             usage_metadata: None,
         };
-
         assert_eq!(extract_text(resp).unwrap(), "Hello");
     }
 
@@ -450,5 +496,144 @@ mod tests {
             usage_metadata: None,
         };
         assert!(extract_text(resp).is_err());
+    }
+
+    #[test]
+    fn vertex_request_omits_qwen_control_prefix() {
+        let request = build_request(
+            &[
+                ChatMessage::system("/no_think\nPlan research; discuss /no_think literally."),
+                ChatMessage::user("/no_think is part of my question"),
+            ],
+            4096,
+            0.3,
+        );
+        let json = serde_json::to_value(request).unwrap();
+        assert_eq!(
+            json["systemInstruction"]["parts"][0]["text"],
+            "Plan research; discuss /no_think literally."
+        );
+        assert_eq!(
+            json["contents"][0]["parts"][0]["text"],
+            "/no_think is part of my question"
+        );
+    }
+
+    #[test]
+    fn malformed_response_preserves_finish_reason_and_message() {
+        let response: VertexResponse = serde_json::from_value(serde_json::json!({
+            "candidates": [{"content": {"role": "model"},
+                "finishReason": "MALFORMED_RESPONSE", "finishMessage": "Invalid model output"}]
+        }))
+        .unwrap();
+        let error = extract_text(response).unwrap_err().to_string();
+        assert!(error.contains("MALFORMED_RESPONSE"), "{error}");
+        assert!(error.contains("Invalid model output"), "{error}");
+    }
+
+    #[test]
+    fn malformed_response_rejects_partial_text() {
+        let response: VertexResponse = serde_json::from_value(serde_json::json!({
+            "candidates": [{"content": {"parts": [{"text": "incomplete answer"}]},
+                "finishReason": "MALFORMED_RESPONSE"}]
+        }))
+        .unwrap();
+        assert!(extract_text(response).is_err());
+    }
+
+    #[tokio::test]
+    async fn stream_finish_reason_is_not_lost() {
+        let _cache_guard = TEST_TOKEN_LOCK.lock().await;
+        let previous = TOKEN_CACHE.lock().unwrap().replace(CachedToken {
+            token: "test-token".into(),
+            expiry: std::time::Instant::now() + std::time::Duration::from_secs(60),
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = axum::Router::new().fallback(|| async {
+        ([("content-type", "text/event-stream")],
+            "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}]}\n\ndata: {\"candidates\":[{\"finishReason\":\"MALFORMED_RESPONSE\"}]}\n\n")
+    });
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (tx, _rx) = mpsc::channel(16);
+        let result = stream(
+            &Client::new(),
+            &format!("http://{address}"),
+            "project",
+            "eu",
+            "model",
+            4096,
+            0.3,
+            vec![ChatMessage::user("test")],
+            tx,
+        )
+        .await;
+        server.abort();
+        *TOKEN_CACHE.lock().unwrap() = previous;
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("MALFORMED_RESPONSE"), "{error}");
+    }
+    #[tokio::test]
+    async fn blocking_and_streaming_usage_include_reported_thought_tokens() {
+        let _cache_guard = TEST_TOKEN_LOCK.lock().await;
+        use axum::response::IntoResponse;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = axum::Router::new().fallback(|uri: axum::http::Uri| async move {
+            let response = serde_json::json!({
+                "candidates":[{"content":{"parts":[{"text":"verified"}]},"finishReason":"STOP"}],
+                "usageMetadata":{"promptTokenCount":1945,"candidatesTokenCount":250,"thoughtsTokenCount":3567,"totalTokenCount":5762}
+            });
+            if uri.path().contains("streamGenerateContent") {
+                ([(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                 format!("data: {response}\n\ndata: [DONE]\n\n")).into_response()
+            } else { axum::Json(response).into_response() }
+        });
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let previous = TOKEN_CACHE.lock().unwrap().replace(CachedToken {
+            token: "local-test-token".into(),
+            expiry: std::time::Instant::now() + std::time::Duration::from_secs(30),
+        });
+        let http = Client::new();
+        let base = format!("http://{address}");
+        let blocking = complete(
+            &http,
+            &base,
+            "test",
+            "global",
+            "test-model",
+            4096,
+            0.0,
+            vec![ChatMessage::user("test")],
+        )
+        .await;
+        let (tx, mut rx) = mpsc::channel(8);
+        let streamed = stream(
+            &http,
+            &base,
+            "test",
+            "global",
+            "test-model",
+            4096,
+            0.0,
+            vec![ChatMessage::user("test")],
+            tx,
+        )
+        .await;
+        *TOKEN_CACHE.lock().unwrap() = previous;
+        server.abort();
+        let (_, blocking_input, blocking_output) = blocking.unwrap();
+        let (text, streaming_input, streaming_output) = streamed.unwrap();
+        assert_eq!(text, "verified");
+        assert_eq!(rx.recv().await.unwrap(), "verified");
+        assert_eq!(
+            (
+                blocking_input,
+                blocking_output,
+                streaming_input,
+                streaming_output
+            ),
+            (1945, 3817, 1945, 3817)
+        );
     }
 }

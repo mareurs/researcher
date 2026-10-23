@@ -222,6 +222,7 @@ directory was created. If you find a researcher bug still filed over there, move
 | `LLM_PROVIDER` | `openai` | Primary LLM backend: `openai` \| `vertex` (live config uses `vertex`) |
 | `LLM_BASE_URL` | `http://localhost:8080/v1` | OpenAI-compat endpoint; for `vertex` defaults to `https://aiplatform.googleapis.com/v1beta1` |
 | `LLM_MODEL` | `Qwen_Qwen3.5-9B-Q4_K_M` | Model name sent in requests (live vertex: `gemini-3.1-flash-lite`) |
+| `LLM_VERIFIER_MODEL` | `` | Optional independent grounding model served by the publisher backend; local Vertex uses `gemini-3.1-pro-preview`. Temperature0; reserves at least8192 output tokens. Empty uses publisher model. |
 | `LLM_API_KEY` | `no-key-needed` | Set to `sk-...` for OpenAI; unused for `vertex` (uses ADC) |
 | `VERTEX_PROJECT` | `` | GCP project id — required when `LLM_PROVIDER=vertex` (live: `sp-mrv-gemini-dev`) |
 | `VERTEX_LOCATION` | `us-central1` | Vertex AI region (live: `eu`) |
@@ -242,7 +243,8 @@ directory was created. If you find a researcher bug still filed over there, move
 | `EMBED_BASE_URL` | `` (disabled) | TEI URL; empty = skip dedup |
 | `DEDUP_THRESHOLD` | `0.92` | Cosine sim cutoff for dedup |
 | `RERANK_BASE_URL` | `` (disabled) | TEI cross-encoder URL; empty = skip reranking |
-| `RERANK_RELEVANCE_WEIGHT` | `0.7` | Cross-encoder score weight in combined ranking |
+| `RERANK_RELEVANCE_WEIGHT` | `0.7` | Scale-independent percentile-rank weight in combined ranking |
+| `RERANK_MIN_SCORE` | `-inf` | Raw-model score cutoff, disabled by default; explicitly calibrate before enabling |
 | `RERANK_AUTHORITY_WEIGHT` | `0.2` | Domain authority weight in combined ranking |
 | `RERANK_QUALITY_WEIGHT` | `0.1` | Content quality weight in combined ranking |
 | `MIN_CONTENT_WORDS` | `100` | Quality filter: minimum word count |

@@ -8,13 +8,11 @@
 - **Problem:** Three overlapping mechanisms suppress thinking tokens: `/no_think` prompt prefix, `STRIP_THINKING_TOKENS` post-processing, and `disable_thinking` flag sending `chat_template_kwargs`. Changing one without awareness of the others can cause unexpected behavior.
   **Fix:** See conventions memory for which stages use which mechanism.
 
-## Fast LLM Falls Back Silently
-- **Problem:** If `LLM_FAST_BASE_URL` is empty, `LlmClient::new_fast()` uses the heavy backend URL/model but still sets `disable_thinking = true`. Planner/summarizer always disable thinking even on single-GPU setups.
-  **Fix:** Expected behavior — just be aware the fast client always has thinking disabled.
+## Fast LLM Fallback
+Verified 2026-10-23: new_fast uses the primary backend/model when both fast base URL and fast provider are empty. Thinking suppression is enabled for an explicitly selected fast backend, not for this primary fallback. Vertex strips the Qwen-only leading /no_think control prefix.
 
-## `shopping-ro` Profile Domain Filtering Bug
-- **Problem:** `searxng.rs::is_non_english_domain()` filters TLDs like `.ro`, `.de`, `.fr` etc. The `shopping-ro` profile targets Romanian sites (olx.ro etc.) but SearXNG results from `.ro` domains get filtered out.
-  **Fix:** Either add an exception to `is_non_english_domain()` for explicitly requested domains, or configure SearXNG to return results without TLD filtering for this profile. (Verify filter logic at `src/search/searxng.rs`.)
+## Explicit Domains and Redirects — Fixed 2026-10-23
+Every search backend now checks parsed hostname boundaries, including explicitly requested .ro sites. SearXNG language heuristics do not discard explicit domain results. Pipeline propagates request/profile hard domains; target fallback hints remain soft. Fetched evidence records final redirect URL and cannot cross hard domain constraints. HTTP regression fixtures and applied mutation review cover provenance/host handling.
 
 ## Job Search Uncapped Concurrency in Deep Mode
 - **Problem:** `write_job_report()` deep mode calls `run()` recursively for top 5 companies via `join_all` — no rate limiting or concurrency cap. Can saturate the LLM backend.
@@ -40,9 +38,8 @@
 - **Problem:** CLAUDE.md describes a single `docker compose --profile local-llm up` command. The actual setup uses two separate stacks: `infra/docker-compose.yml` (AI infra) and root `docker-compose.yml` (researcher app), coordinated via the external `ai-infra-net` Docker network.
   **Fix:** Use Makefile targets or start stacks manually in order (infra first, then app).
 
-## RERANK_MIN_SCORE Not in CLAUDE.md
-- **Problem:** `RERANK_MIN_SCORE` env var (default -5.0 logits) is implemented but missing from CLAUDE.md's env var reference table. Can't be discovered from docs alone.
-  **Fix:** Set in `.env` if you want stricter reranking. Check `src/embeddings/reranker.rs` for current default.
+## Rerank Score Units and Runtime
+Verified 2026-10-23: ranking uses within-batch percentile relevance so raw model scale cannot overwhelm the blend. RERANK_MIN_SCORE defaults to -inf (disabled), in Config and config_from_env; explicit thresholds stay in raw-model units. README/CLAUDE document it. Healthy local TEI is port30083; the unavailable Codex/project48083 setting was corrected. Do not introduce model-specific calibrated defaults.
 
 ## Secret Scans: codescout `grep` Silently Skips Dotfiles
 - **Problem:** codescout's `grep` tool does not match files whose names begin with `.` (e.g. `.mcp.json.bak-*`). A pre-commit credential sweep run with it returns "0 matches" while live API keys sit in tracked dotfiles. This bit us on 2026-07-13: the scan came back clean, a push went out, and four live keys (Gemini, Brave, Tavily, Exa) landed in the then-public repo.
@@ -55,3 +52,6 @@
 ## Tooling State Keeps Creeping Back Into Git
 - **Problem:** `.buddy/` and `.codescout/` runtime files (session narratives, debug logs, `embeddings/project.db`, `.fastembed_cache/` ONNX blobs) get re-tracked whenever a broad `git add` runs with the ignore rules missing. Commit 9b8d460 ("checkpoint") clobbered the ignore block added in 516fd5d, re-tracking 249 files.
   **Fix:** Ignore rules restored in `.gitignore` under "Tooling state". `.codescout/memories/`, `project.toml` and `system-prompt.md` are deliberate project artifacts and STAY tracked — never blanket-ignore all of `.codescout/`.
+
+## Grounding, Measurement and Evidence Audits — 2026-10-23
+LLM_VERIFIER_MODEL is optional and must be served by the publisher backend. Local Vertex uses gemini-3.1-pro-preview for property checks and Flash Lite for other stages. Model checks are not proof of universal entailment: final live audit assessed3 complete reports, all grounded, with1 explicit evidence fallback and a partial shopping comparison. Retained artifacts and measured timings: docs/evals/researcher-quality-repair-20261023.json. Vertex thoughtsTokenCount is separate from candidatesTokenCount and must be included in generated-token accounting. Async unit tests that replace TOKEN_CACHE share TEST_TOKEN_LOCK and restore prior cache values. Saved-report audits use the companion skill's capture_evidence.py raw-byte helper with hashes; never reconstruct Markdown from rendered reads.

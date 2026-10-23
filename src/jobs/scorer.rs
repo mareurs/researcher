@@ -2,9 +2,9 @@ use anyhow::Result;
 use serde::Deserialize;
 use tracing::info;
 
+use super::fetcher::JobListing;
 use crate::config::JobProfile;
 use crate::llm::client::{ChatMessage, LlmClient};
-use super::fetcher::JobListing;
 
 /// A job listing with an LLM-assigned match score and reason.
 #[derive(Debug, Clone)]
@@ -33,18 +33,26 @@ pub async fn score_listings(
         return Ok(vec![]);
     }
 
-    info!(count = listings.len(), "scoring job listings against profile");
+    info!(
+        count = listings.len(),
+        "scoring job listings against profile"
+    );
 
-    let listings_text = listings.iter().enumerate().map(|(i, j)| {
-        let salary = j.salary.as_deref().unwrap_or("not listed");
-        format!(
-            "{id}. {title} @ {company} | salary: {salary}\n   {desc}",
-            id = i + 1,
-            title = j.title,
-            company = j.company,
-            desc = j.description,
-        )
-    }).collect::<Vec<_>>().join("\n\n");
+    let listings_text = listings
+        .iter()
+        .enumerate()
+        .map(|(i, j)| {
+            let salary = j.salary.as_deref().unwrap_or("not listed");
+            format!(
+                "{id}. {title} @ {company} | salary: {salary}\n   {desc}",
+                id = i + 1,
+                title = j.title,
+                company = j.company,
+                desc = j.description,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
 
     let profile_text = format!(
         "Title: {}\nSeniority: {}\nSalary floor: {}\nRemote only: {}\n\
@@ -74,7 +82,7 @@ pub async fn score_listings(
     let messages = vec![
         ChatMessage::system(
             "You are a precise job-match evaluator. Return only valid JSON arrays. \
-             No markdown fences, no explanation outside the JSON."
+             No markdown fences, no explanation outside the JSON.",
         ),
         ChatMessage::user(prompt),
     ];
@@ -83,24 +91,31 @@ pub async fn score_listings(
 
     // Find the JSON array even if model adds surrounding text
     let json_start = response.find('[').unwrap_or(0);
-    let json_end   = response.rfind(']').map(|i| i + 1).unwrap_or(response.len());
+    let json_end = response.rfind(']').map(|i| i + 1).unwrap_or(response.len());
     let json_slice = &response[json_start..json_end];
 
     let scores: Vec<ScoreEntry> = serde_json::from_str(json_slice)
         .inspect_err(|e| tracing::warn!(error = %e, "failed to parse scorer JSON response"))
         .unwrap_or_default();
 
-    let mut result: Vec<ScoredJob> = scores.into_iter().filter_map(|s| {
-        let idx = s.id.checked_sub(1)?;
-        let listing = listings.get(idx)?.clone();
-        if s.score >= threshold {
-            Some(ScoredJob { listing, score: s.score, reason: s.reason })
-        } else {
-            None
-        }
-    }).collect();
+    let mut result: Vec<ScoredJob> = scores
+        .into_iter()
+        .filter_map(|s| {
+            let idx = s.id.checked_sub(1)?;
+            let listing = listings.get(idx)?.clone();
+            if s.score >= threshold {
+                Some(ScoredJob {
+                    listing,
+                    score: s.score,
+                    reason: s.reason,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    result.sort_by(|a, b| b.score.cmp(&a.score));
+    result.sort_by_key(|item| std::cmp::Reverse(item.score));
 
     info!(kept = result.len(), "scoring complete");
     Ok(result)

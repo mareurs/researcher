@@ -1,18 +1,25 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: researcher''s reranker is a no-op in its shipping config — ms-marco-MiniLM-L-6-v2 scores lexical overlap, so no min_score separates relevant from irrelevant and the 0.7 relevance weight contributes ~1e-5'
 tags:
 - researcher
 - rerank
 - calibration
 - cross-repo
-closed: null
+closed: 2026-10-23
 opened: 2026-07-27
 owner: marius
-related: ["codescout:docs/issues/archive/2026-07-27-reranker-gpu-tei-cuda-oom.md"]
+related:
+- codescout:docs/issues/archive/2026-07-27-reranker-gpu-tei-cuda-oom.md
 severity: medium
 ---
+
+## Resolution — 2026-10-23
+
+Replaced raw-score relevance blending with within-batch percentile ranks (ties share midrank; singletons are neutral). TEI response indices must cover every input exactly once with finite scores. Absolute score filtering is disabled by default in both config paths; an explicit threshold remains in the selected model's raw units. Reranking runs independently of embedding dedup.
+
+Verified current TEI service on `localhost:30083`; corrected the unavailable Codex `48083` setting and disabled its obsolete threshold. Applied mutation review found 3 survivors among 4 candidates; tests were added after observing survival and all 3 reapplications were killed. Five reranker tests pass in both binary targets. Full cargo test and strict Clippy pass after the combined repairs. No model-specific calibrated threshold was shipped.
 
 # BUG: researcher's rerank score scale is uncalibrated — min_score was dead under TEI, weight blend now distorted under llama-server
 

@@ -14,37 +14,37 @@ src/jobs/                         — job fetching (Remotive+Adzuna+SearXNG), LL
 ```
 
 ## Key Abstractions
-- `run()` — `src/researcher/pipeline.rs:174` — 10-stage orchestrator; only external-facing surface of the pipeline
-- `ResearchRequest { topic, mode, domains, domain_profile, target, fast_stages }` — controls ALL pipeline behavior
+- `run()` — `src/researcher/pipeline.rs` — main research orchestrator
+- `ResearchRequest { topic, mode, domains, domain_profile, target, intent }` — controls ALL pipeline behavior
 - `ResearchTarget` enum — `Topic | Person { method } | Company | Market { asset_class }` — fans out domain lists, prompts, report templates
 - `ResearchMode` enum — `Quick | Summary | Report | Deep` — controls depth; Quick returns after crawl, no summarize/write
 - `LlmClient { base_url, model, disable_thinking, strip_thinking, … }` — single struct for both heavy and fast LLM; `new()` vs `new_fast()`
 - `ProgressEvent` enum (11 variants) — typed progress notifications; Display impl for human-readable strings
 - `Config` — `src/config.rs` — single clap-derive struct serving both CLI and server; `config_from_env()` in mcp_server.rs is a manually maintained duplicate
 
-## Pipeline Stages (run() — pipeline.rs:174)
-1. Resolve effective domains (profile lookup ∪ raw domains ∪ target fallback)
+## Pipeline Stages
+1. Resolve explicit profile/raw domains as hard backend constraints; target fallback domains remain soft planning hints
 2. Deep mode: 2× max_queries + max_sources
 3. Build heavy LlmClient (`new`) + fast LlmClient (`new_fast`)
-4. Assign stage LLM clients based on `fast_stages` (request overrides cfg; default: planner+summarizer=fast, publisher=heavy)
+4. Assign stage clients using Config.llm_fast_stages; empty routes all stages to the primary client
 5. **Plan** — `generate_queries()` — LLM generates N sub-questions; domain hints injected per target type
 6. **Crawl** — `crawl_all()` — sequential queries, concurrent fetches per query; shared visited-URL HashSet for global dedup
 7. **Quick exit** — if mode==Quick, return sources without summarizing
 8a. Quality filter — `filter_sources()` — drops thin (<100 words), paywalled, low-density pages
 8b. Embed dedup — if EMBED_BASE_URL set: `deduplicate()` greedy cosine-sim (threshold 0.92), re-assess quality
-8c. Cross-encoder rerank — if RERANK_BASE_URL set: `rerank()` combined score (relevance×0.7 + authority×0.2 + quality×0.1)
-9. **Summarize** — `summarize_all()` — fully concurrent join_all; LlmClient cloned per future (reqwest::Client is Arc-backed)
-10. **Write** — `write_report()` — dispatches on ResearchTarget+ResearchMode for prompt template; streaming (token_tx=Some) or blocking (token_tx=None); `format_report()` appends numbered Sources section
+8c. Rerank independently of dedup when RERANK_BASE_URL is set. Validate full unique index coverage/finite scores; combine percentile relevance with authority/quality. Absolute raw-score filtering defaults disabled (-inf)
+9. **Select evidence** — summarize_all has concurrency3; relevant quotes must occur verbatim in retrieved text. Origin, observation time and truncation follow the retained excerpts
+10. **Write and verify** — bounded <=1200-character segments, <=24 checks, concurrency3, at most2 drafts. LLM_VERIFIER_MODEL optionally selects an independent model on the publisher backend. Property-level failures or invalid verdicts trigger repair, then attributed evidence fallback. Final SourceEntry values are rebuilt from retained evidence (including recovery sources); format_report appends authoritative provenance
 
 ## Streaming vs Blocking Split
-- CLI / HTTP SSE: `token_tx = Some(tx)` → `stream_completion()` (eventsource-stream SSE, mpsc channel)
+- CLI / HTTP SSE: draft tokens are streamed into an internal drain; validated report is then sent to the caller. Unverified draft text is withheld
 - MCP / JSON API: `token_tx = None` → `llm.complete()` (blocking POST, returns full string)
-- Same `run()` function handles both paths
+- Same run() handles both paths. Vertex output usage sums reported candidates and thoughts in blocking and SSE paths; disclosure abstracts/takeaways are extractive
 
 ## Design Patterns
 - All pipeline stages are pure functions (no shared mutable state except `visited` HashSet in crawl)
 - `on_progress: impl Fn(ProgressEvent)` closure — decouples transport from pipeline
-- MCP tools: each builds a ResearchRequest and calls run() with eprintln! as progress handler
+- MCP exposes one research(query,target?,...) dispatcher; it uses the pipeline or target-specific helpers
 - Job search deep mode: calls `run(ResearchTarget::Company)` recursively for top 5; concurrent via join_all (no rate limit)
 
 ## Invariants
@@ -54,12 +54,12 @@ src/jobs/                         — job fetching (Remotive+Adzuna+SearXNG), LL
 | Config field added → update BOTH `Config` AND `config_from_env()` | MCP binary can't use clap; manual duplicate; drift = silent wrong defaults |
 | `crawl_all()` queries are sequential | Shared `visited: HashSet<String>` for global URL dedup; parallelizing requires Arc<Mutex<>> |
 | `strip_thinking` exists in client.rs AND stream.rs | Both paths strip `<think>` — changing one without the other leaves thinking tokens in one mode |
-| MCP tool methods return String not Result | rmcp tool return type is String; errors embedded as "Error: {e:#}" |
+| MCP dispatch helpers return Result<String>; the tool returns CallToolResult | Map failures to CallToolResult::error (isError=true), preserving the full anyhow error chain |
 
 ## Strong Defaults
 
 | Default | When it's okay to break it |
 |---|---|
-| planner+summarizer use fast LLM | Override per-request via `fast_stages` field or `LLM_FAST_STAGES` env |
-| publisher uses heavy LLM | Add "publisher" to fast_stages if report quality is acceptable from fast model |
+| Stage routing uses Config.llm_fast_stages | Configure LLM_FAST_STAGES and compatible fast backend/model |
+| Verifier inherits publisher model unless configured | Set LLM_VERIFIER_MODEL to a stronger compatible model; local Vertex uses gemini-3.1-pro-preview while other stages use Flash Lite |
 | Dedup/rerank disabled if env vars empty | Enable by setting EMBED_BASE_URL / RERANK_BASE_URL |

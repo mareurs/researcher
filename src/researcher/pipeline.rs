@@ -197,6 +197,10 @@ pub struct SourceEntry {
     pub url: String,
     pub title: String,
     pub snippet: String,
+    #[serde(default)]
+    pub provenance: super::crawler::SourceProvenance,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub evidence: String,
 }
 
 /// Close a span if tracing is active. Absorbs the `Option` dance from `run()`.
@@ -220,7 +224,12 @@ fn close_span_on_err<T>(
     result: Result<T>,
 ) -> Result<T> {
     if let Err(e) = &result {
-        end_span(trace, span.take(), json!(null), json!({ "error": e.to_string() }));
+        end_span(
+            trace,
+            span.take(),
+            json!(null),
+            json!({ "error": e.to_string() }),
+        );
     }
     result
 }
@@ -268,6 +277,8 @@ pub async fn run(
             domains.push(d.clone());
         }
     }
+
+    let hard_domains = domains.clone();
 
     // Fall back to target-specific domain set when no explicit domains given
     if domains.is_empty() {
@@ -360,6 +371,7 @@ pub async fn run(
         //    needs it on the config it receives to drive backend selection.
         let mut eff_cfg = cfg.clone();
         eff_cfg.domain_profile = request.domain_profile.clone();
+        eff_cfg.cli_domains = hard_domains.clone();
         if depth {
             eff_cfg.max_sources_per_query = max_sources;
         }
@@ -389,6 +401,8 @@ pub async fn run(
                 url: s.url.clone(),
                 title: s.title.clone(),
                 snippet: s.content.chars().take(200).collect(),
+                provenance: s.provenance.clone(),
+                evidence: String::new(),
             })
             .collect();
 
@@ -410,66 +424,42 @@ pub async fn run(
         end_span(&trace, qf_span, json!(null), json!({ "in": n_in, "out": quality_sources.len() }));
         info!(sources = quality_sources.len(), "quality filter complete");
 
-        // 8b. Embedding dedup (if TEI configured)
-        let sources = if !cfg.embed_base_url.is_empty() {
+        // Deduplication and reranking are independently configurable.
+        let quality_sources = if !cfg.embed_base_url.is_empty() {
             on_progress(ProgressEvent::Deduplicating { total: quality_sources.len() });
             let embed = EmbedClient::new(&cfg.embed_base_url);
-            let just_sources: Vec<ScrapedSource> = quality_sources.into_iter().map(|(s, _q)| s).collect();
+            let just_sources = quality_sources.into_iter().map(|(s, _)| s).collect();
             let dd_span = trace.as_ref().map(|t| t.span("dedup", None));
-            let n_in = just_sources.len();
-            let deduped = deduplicate(&embed, just_sources, cfg.dedup_threshold, cfg.max_sources_per_query).await;
-            end_span(
-                &trace,
-                dd_span,
-                json!(null),
-                json!({ "in": n_in, "out": deduped.len(), "threshold": cfg.dedup_threshold }),
-            );
-
-            // Re-assess quality after dedup (lost annotations during dedup)
-            let quality_sources: Vec<_> = deduped
-                .into_iter()
-                .map(|s| {
-                    let q = assess_quality(&s, &request.target);
-                    (s, q)
-                })
-                .collect();
-
-            // 8c. Cross-encoder rerank (if reranker configured)
-            if !cfg.rerank_base_url.is_empty() {
-                on_progress(ProgressEvent::Reranking { total: quality_sources.len() });
-                let reranker = RerankerClient::new(&cfg.rerank_base_url);
-                // Clone before passing to rerank since it consumes the vec
-                let fallback: Vec<ScrapedSource> = quality_sources.iter().map(|(s, _)| s.clone()).collect();
-                let rr_span = trace.as_ref().map(|t| t.span("rerank", None));
-                let n_in = quality_sources.len();
-                match reranker.rerank(
-                    topic,
-                    quality_sources,
-                    cfg.rerank_relevance_weight,
-                    cfg.rerank_authority_weight,
-                    cfg.rerank_quality_weight,
-                    cfg.rerank_min_score,
-                ).await {
-                    Ok(ranked) => {
-                        end_span(&trace, rr_span, json!(null), json!({ "in": n_in, "out": ranked.len() }));
-                        on_progress(ProgressEvent::CrawlComplete { sources: ranked.len() });
-                        ranked.into_iter().map(|r| r.source).collect()
-                    }
-                    Err(e) => {
-                        end_span(&trace, rr_span, json!(null), json!({ "in": n_in, "error": e.to_string() }));
-                        tracing::warn!(%e, "cross-encoder rerank failed, using dedup order");
-                        on_progress(ProgressEvent::CrawlComplete { sources: fallback.len() });
-                        fallback
-                    }
+            let deduped = deduplicate(&embed, just_sources, cfg.dedup_threshold, max_sources).await;
+            end_span(&trace, dd_span, json!(null), json!({ "out": deduped.len() }));
+            deduped.into_iter().map(|s| {
+                let q = assess_quality(&s, &request.target);
+                (s, q)
+            }).collect::<Vec<_>>()
+        } else {
+            quality_sources
+        };
+        let sources = if !cfg.rerank_base_url.is_empty() {
+            on_progress(ProgressEvent::Reranking { total: quality_sources.len() });
+            let reranker = RerankerClient::new(&cfg.rerank_base_url);
+            let fallback = quality_sources.iter().map(|(s, _)| s.clone()).collect::<Vec<_>>();
+            let rr_span = trace.as_ref().map(|t| t.span("rerank", None));
+            match reranker.rerank(topic, quality_sources, cfg.rerank_relevance_weight,
+                cfg.rerank_authority_weight, cfg.rerank_quality_weight, cfg.rerank_min_score).await {
+                Ok(ranked) => {
+                    end_span(&trace, rr_span, json!(null), json!({ "out": ranked.len() }));
+                    ranked.into_iter().map(|r| r.source).collect::<Vec<_>>()
+                },
+                Err(e) => {
+                    end_span(&trace, rr_span, json!(null), json!({ "error": e.to_string() }));
+                    tracing::warn!(%e, "rerank failed; retaining source order and requiring evidence relevance checks");
+                    fallback
                 }
-            } else {
-                on_progress(ProgressEvent::CrawlComplete { sources: quality_sources.len() });
-                quality_sources.into_iter().map(|(s, _)| s).collect()
             }
         } else {
-            on_progress(ProgressEvent::CrawlComplete { sources: quality_sources.len() });
             quality_sources.into_iter().map(|(s, _)| s).collect()
         };
+        on_progress(ProgressEvent::CrawlComplete { sources: sources.len() });
 
         // 9. Summarize concurrently
         info!(count = sources.len(), "sources entering summarizer (post-filter/dedup/rerank)");
@@ -538,6 +528,15 @@ pub async fn run(
         } else {
             first_summaries
         };
+
+        // Return the actual retained evidence, including any recovery sources.
+        let source_entries = summaries.iter().map(|s| SourceEntry {
+            url: s.url.clone(),
+            title: s.title.clone(),
+            snippet: s.summary.chars().take(200).collect(),
+            provenance: s.provenance.clone(),
+            evidence: s.summary.clone(),
+        }).collect();
 
         // 10. Write report (streaming if token_tx provided)
         let mut write_span = trace.as_ref().map(|t| t.span("write-report", None));
@@ -663,7 +662,6 @@ impl std::fmt::Display for ProgressEvent {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,19 +671,24 @@ mod tests {
     fn close_span_on_err_closes_span_with_error_before_propagating() {
         let (trace, mut rx) = ResearchTrace::for_test();
         let mut span = Some(trace.span("plan", None));
-        let result: Result<u32> = close_span_on_err(
-            &Some(trace),
-            &mut span,
-            Err(anyhow::anyhow!("boom")),
-        );
+        let result: Result<u32> =
+            close_span_on_err(&Some(trace), &mut span, Err(anyhow::anyhow!("boom")));
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().to_string(), "boom");
-        assert!(span.is_none(), "span should be taken/consumed on the error path");
+        assert!(
+            span.is_none(),
+            "span should be taken/consumed on the error path"
+        );
 
-        let batch = rx.try_recv().expect("end_span should have queued a span-create event");
+        let batch = rx
+            .try_recv()
+            .expect("end_span should have queued a span-create event");
         assert_eq!(batch[0]["type"], serde_json::json!("span-create"));
-        assert_eq!(batch[0]["body"]["metadata"]["error"], serde_json::json!("boom"));
+        assert_eq!(
+            batch[0]["body"]["metadata"]["error"],
+            serde_json::json!("boom")
+        );
     }
 
     #[test]
@@ -695,7 +698,96 @@ mod tests {
         let result = close_span_on_err(&Some(trace), &mut span, Ok::<_, anyhow::Error>(42));
 
         assert_eq!(result.unwrap(), 42);
-        assert!(span.is_some(), "success path must not close the span — caller closes it with stage-specific output");
-        assert!(rx.try_recv().is_err(), "no event should be queued until the caller's own end_span call");
+        assert!(
+            span.is_some(),
+            "success path must not close the span — caller closes it with stage-specific output"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "no event should be queued until the caller's own end_span call"
+        );
+    }
+    #[tokio::test]
+    async fn pipeline_propagates_domains_reranks_without_embed_and_returns_only_retained_evidence()
+    {
+        use clap::Parser;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let base = format!("http://{address}");
+        let search_base = base.clone();
+        let rerank_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = rerank_count.clone();
+        let app = axum::Router::new()
+            .route("/search", axum::routing::get(move || {
+                let base = search_base.clone();
+                async move { axum::Json(json!({"results":[
+                    {"title":"Kept documentation","url":format!("{base}/kept"),"content":"read and read_exact safety"},
+                    {"title":"Discarded page","url":format!("{base}/discarded"),"content":"irrelevant reference"}
+                ]})) }
+            }))
+            .route("/kept", axum::routing::get(|| async { axum::response::Html(
+                "<main><h1>Read safety</h1><p>read is safe; read_exact is unsafe. This source documents cancellation safety with enough content to extract as a full page.</p></main>") }))
+            .route("/discarded", axum::routing::get(|| async { axum::response::Html(
+                "<main><h1>Unrelated material</h1><p>Discard this unrelated page. It contains reference material on a different subject and no evidence about the research question.</p></main>") }))
+            .route("/rerank", axum::routing::post(move || {
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { axum::Json(json!([{"index":1,"score":0.01},{"index":0,"score":0.99}])) }
+            }))
+            .fallback(|axum::Json(body): axum::Json<serde_json::Value>| async move {
+                let system = body["messages"][0]["content"].as_str().unwrap_or("");
+                let user = body["messages"][1]["content"].as_str().unwrap_or("");
+                let text = if system.contains("You select evidence") {
+                    if user.contains("Discard this") { r#"{"relevant":false,"quotes":[]}"# }
+                    else { r#"{"relevant":true,"quotes":["read is safe; read_exact is unsafe."]}"# }
+                } else if system.contains("You check factual entailment") {
+                    r#"{"supported":true,"issues":[]}"#
+                } else if user.contains("Generate exactly") {
+                    "Tokio read cancellation safety site:127.0.0.1"
+                } else {
+                    "read is safe; read_exact is unsafe. [1]"
+                };
+                axum::Json(json!({"choices":[{"message":{"content":text}}]}))
+            });
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut cfg = Config::parse_from(["researcher"]);
+        cfg.llm_provider = "openai".into();
+        cfg.llm_base_url = base.clone();
+        cfg.llm_fast_base_url.clear();
+        cfg.embed_base_url.clear();
+        cfg.rerank_base_url = base.clone();
+        cfg.searxng_url = base;
+        cfg.brave_api_key.clear();
+        cfg.tavily_api_key.clear();
+        cfg.exa_api_key.clear();
+        cfg.cli_domains = vec!["wrong.example".into()];
+        cfg.max_search_queries = 1;
+        cfg.max_sources_per_query = 2;
+        cfg.min_content_words = 1;
+        cfg.min_text_density = 0.0;
+        cfg.judge_enabled = false;
+        cfg.langfuse_host.clear();
+        let mut request = ResearchRequest::new("read and read_exact cancellation safety");
+        request.domains = vec!["127.0.0.1".into()];
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            run(&cfg, &request, |_| {}, None),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        server.abort();
+        assert_eq!(rerank_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(result.sources.len(), 1);
+        assert!(result.sources[0].url.ends_with("/kept"));
+        assert_eq!(
+            result.sources[0].evidence,
+            "read is safe; read_exact is unsafe."
+        );
+        assert_eq!(
+            result.sources[0].provenance.origin,
+            super::super::crawler::SourceOrigin::FetchedPage
+        );
+        assert!(!result.sources[0].provenance.retrieved_at.is_empty());
+        assert!(result.report.unwrap().contains("read_exact is unsafe"));
     }
 }

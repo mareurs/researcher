@@ -53,6 +53,7 @@ docs/superpowers/
 .codescout/libraries.json
 .codescout/usage.db*
 .codescout/write.lock
+.codescout/write.lock.holder
 
 # Claude Code local state — logs, locks, scheduled tasks. Local tooling
 # runtime, never a project artifact. (Untracked codescout-companion.log +

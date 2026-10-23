@@ -215,16 +215,18 @@ cargo build --release --bin researcher-mcp
 
 ### MCP Tools
 
-| Tool | Parameters | Description |
-|------|-----------|-------------|
-| `research` | `query`, `mode?`, `domain_profile?`, `domains?`, `max_queries?`, `max_sources?` | General web research → markdown report |
-| `research_person` | `name`, `method?` | Meeting prep brief (career, voice, interests, hooks). `method`: professional\|personal\|both |
-| `research_company` | `name`, `country?` | Company brief (what they do, size, news, culture, strategy) |
-| `research_code` | `framework`, `version?`, `aspects?`, `repo?`, `query?` | Library research: bugs, changelog, community sentiment |
-| `search_jobs` | `query`, `mode?` | Remote job search matched to your `profiles.toml [job-profile]`. `mode`: list\|deep |
-| `market_insight` | `query`, `asset_class?`, `mode?` | Stock/crypto/macro research. `asset_class`: stock\|crypto\|macro |
+The MCP server exposes one tool: `research(query, target?, ...)`.
 
-**Research modes:** `quick` (snippets), `summary` (bullets), `report` (full markdown, default), `deep` (thorough)
+| `target` | Additional parameters | Result |
+|----------|-----------------------|--------|
+| `topic` (default) | `intent?`, `domain_profile?`, `domains?`, `max_queries?`, `max_sources?` | General research |
+| `person` | `person_method?` (`company`, `personal`, `both`) | Person brief |
+| `company` | `country?` | Company brief |
+| `code` | `version?`, `aspects?` (JSON array), `repo?`, `keywords?` | Library bugs, changes, releases and community evidence |
+| `jobs` | `mode?` | Job search using `profiles.toml [job-profile]` |
+| `market` | `asset_class?` (`stock`, `crypto`, `macro`) | Market research |
+
+Shared options include `mode` (`quick`, `summary`, `report`, `deep`), `summary_style` (`toc`, `abstract`, `takeaways`), and `raw_json`. Reports longer than the disclosure threshold return a saved-file envelope; read the full report at its `path`. Use `raw_json=true` to retain the report, selected source evidence, provenance, and queries together.
 
 ## HTTP API
 
@@ -289,9 +291,10 @@ All settings are environment variables. Copy `.env.example` to `.env` and edit.
 |----------|---------|-------------|
 | `LLM_PROVIDER` | `openai` | `openai` or `vertex` |
 | `LLM_BASE_URL` | `http://localhost:8080/v1` | Any OpenAI-compatible endpoint; for Vertex use `https://aiplatform.googleapis.com/v1beta1` |
-| `LLM_MODEL` | `Qwen3.5-4B-Q4_K_M` | Model name sent in requests |
+| `LLM_MODEL` | `Qwen_Qwen3.5-9B-Q4_K_M` | Model name sent in requests |
+| `LLM_VERIFIER_MODEL` | `` | Optional grounding model on the publisher backend; empty uses publisher model |
 | `LLM_API_KEY` | `no-key-needed` | Set to `sk-...` for OpenAI-compatible providers; ignored for Vertex |
-| `LLM_MAX_TOKENS` | `4096` | Max tokens per LLM call |
+| `LLM_MAX_TOKENS` | `4096` | Generation token limit; an explicit verifier reserves at least 8192 tokens for property checks |
 | `LLM_TEMPERATURE` | `0.3` | Generation temperature |
 | `STRIP_THINKING_TOKENS` | `true` | Strip `<think>...</think>` from Qwen3 responses |
 | `VERTEX_PROJECT` | `` | Required when `LLM_PROVIDER=vertex` |
@@ -311,6 +314,14 @@ Route different pipeline stages to a second model backend. Leave `LLM_FAST_BASE_
 | `LLM_FAST_STAGES` | `planner,summarizer,publisher` | Pipeline stages routed to fast LLM |
 
 Valid stage names: `planner`, `summarizer`, `publisher`
+
+### Grounding and source evidence
+
+Fetched sources retain origin, observation time, final URL, and truncation status. Relevant evidence is selected as verbatim excerpts and checked against source text. Publication checks use bounded segments and one repair attempt; an unverifiable synthesis becomes an attributed evidence report. Draft tokens are held until validation completes. Disclosure abstracts and takeaways are extracted from the completed report.
+
+`LLM_VERIFIER_MODEL` selects a separate verifier model served by the publisher's backend and credentials, at temperature zero. Choose a model available on that endpoint. The local Vertex setup uses `gemini-3.1-pro-preview` for verification and `gemini-3.1-flash-lite` for the other stages after captured failures showed unreliable self-approval by the writer. Verification adds latency and model usage. It compares each assertion's subject and property with the evidence; these semantic checks remain model-dependent.
+
+A fetched page is an observed snapshot. Search snippets and provider extracts do not establish current prices or stock, and a retail listing does not establish new condition. Missing evidence stays explicit.
 
 ### Search & crawling
 
@@ -334,7 +345,8 @@ Both are disabled when their `*_BASE_URL` is empty — the pipeline skips those 
 | `EMBED_BASE_URL` | `` (disabled) | TEI embed endpoint (e.g. `http://localhost:8081`) |
 | `DEDUP_THRESHOLD` | `0.92` | Cosine similarity cutoff for deduplication |
 | `RERANK_BASE_URL` | `` (disabled) | TEI rerank endpoint (e.g. `http://localhost:8082`) |
-| `RERANK_RELEVANCE_WEIGHT` | `0.7` | Cross-encoder score weight |
+| `RERANK_RELEVANCE_WEIGHT` | `0.7` | Within-batch percentile-rank weight, independent of raw model scale |
+| `RERANK_MIN_SCORE` | `-inf` (disabled) | Optional raw-model score cutoff; calibrate explicitly before enabling |
 | `RERANK_AUTHORITY_WEIGHT` | `0.2` | Domain authority weight |
 | `RERANK_QUALITY_WEIGHT` | `0.1` | Content quality weight |
 
